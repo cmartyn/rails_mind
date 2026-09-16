@@ -1,0 +1,11 @@
+source "https://rubygems.org"
+gemspec
+gem "rake"
+gem "minitest", ">= 5.20"
+gem "activejob", "~> 8.1.3"
+gem "ahoy_matey", "~> 5.5"
+gem "flipper", "~> 1.4"
+gem "opentelemetry-sdk", "~> 1.13"
+gem "opentelemetry-instrumentation-rails", "~> 0.42.0"
+gem "opentelemetry-instrumentation-pg", "~> 0.37.0"
+gem "opentelemetry-instrumentation-net_http", "~> 0.29.0"

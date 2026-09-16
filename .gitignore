@@ -1,0 +1,7 @@
+/.bundle/
+/vendor/bundle/
+/pkg/
+/tmp/
+/*.gem
+.env*
+.DS_Store
