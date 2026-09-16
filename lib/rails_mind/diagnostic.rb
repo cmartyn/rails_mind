@@ -7,7 +7,9 @@ module RailsMind
       opentelemetry-instrumentation-pg opentelemetry-instrumentation-net_http good_job sidekiq
       solid_queue delayed_job sentry-rails honeybadger bugsnag rollbar bullet prosopite field_test].freeze
 
-    def initialize(root: Dir.pwd) = @root = root
+    def initialize(root: Dir.pwd, config: RailsMind.configuration)
+      @root, @config = root, config
+    end
 
     def report
       lockfile = File.join(@root, "Gemfile.lock")
@@ -15,8 +17,10 @@ module RailsMind
       detected = GEMS.to_h { |name| [ name, versions[name] ] }
       {
         sdk: VERSION, ruby: RUBY_VERSION, detected: detected.compact,
-        credential_present: !ENV["RAILS_MIND_KEY"].to_s.empty?,
-        endpoint_present: !ENV["RAILS_MIND_ENDPOINT"].to_s.empty?,
+        credential_present: !@config.token.to_s.strip.empty?,
+        endpoint_present: !@config.endpoint.to_s.strip.empty?,
+        release_present: !@config.release.to_s.strip.empty?,
+        enabled: @config.enabled?,
         plan: [
           "Add one initializer. No database migrations or Gemfile changes.",
           "Requests and jobs: unsampled measurements via Rails notifications; errors via Rails.error.",

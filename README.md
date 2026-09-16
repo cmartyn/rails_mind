@@ -18,9 +18,14 @@ bin/rails generate rails_mind:install
 bin/rails rails_mind:doctor
 ```
 
-Set `RAILS_MIND_ENDPOINT`, `RAILS_MIND_KEY`, and `RAILS_MIND_RELEASE`. The ingest key belongs to one application environment. Collection stays off until endpoint and key are both present.
+Set **`RAILS_MIND_KEY`** for the destination application environment. It is the only
+required setting; collection stays off without it. The endpoint defaults to
+`https://railsmind.com`. Release IDs are detected from hosting metadata or the
+app's deployed `REVISION` file; telemetry still works when none is available.
+`RAILS_MIND_ENDPOINT` and `RAILS_MIND_RELEASE` are optional overrides. See
+[configuration and release detection](docs/sdk.md#configuration-and-release-detection).
 
-After setting the endpoint and key, run `bin/rails rails_mind:verify` on the app's
+After setting the key, run `bin/rails rails_mind:verify` on the app's
 server. Match its check ID in RailsMind **Setup** and wait for **Check processed**.
 Then visit the app to confirm real traffic. This command sends one labeled
 diagnostic check, consumes one event of quota, and leaves business/performance

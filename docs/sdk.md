@@ -18,15 +18,52 @@ bin/rails rails_mind:doctor
 
 The plan inspects `Gemfile.lock` and prints selected versions, coexistence decisions, and missing options. Installation adds one initializer, preserves an existing initializer even with `--force`, and does not change migrations, dependencies, Ahoy stores, Flipper adapters, or OpenTelemetry providers. The doctor is read-only and does not contact the server or print credentials.
 
-Set these on the customer's server:
+## Configuration and release detection
+
+Set only the environment-scoped ingest key on the customer's server:
 
 ```sh
-RAILS_MIND_ENDPOINT=https://your-rails-mind-host
 RAILS_MIND_KEY=<environment-scoped-credential>
-RAILS_MIND_RELEASE=<deployed-git-sha>
 ```
 
-Endpoint and key are both required to enable delivery. HTTPS is required except for localhost/loopback development. The key determines application/environment scope; never give it to browser JavaScript. `apm`, `errors`, `analytics`, and `flags` can each be disabled in the initializer.
+The endpoint defaults to `https://railsmind.com`. To use a local or self-hosted
+RailsMind instance, set `RAILS_MIND_ENDPOINT` (for example,
+`http://127.0.0.1:3000`). An unset or whitespace-only override uses the hosted
+default. HTTPS is required except for localhost/loopback development. The key
+controls application/environment scope; never give it to browser JavaScript.
+Collection stays off without a nonblank key. `apm`, `errors`, `analytics`, and
+`flags` can each be disabled in the initializer.
+
+Release detection uses the first nonblank value in this order:
+
+1. `RAILS_MIND_RELEASE` — optional explicit override.
+2. `GIT_REVISION` — existing deployment convention.
+3. `RENDER_GIT_COMMIT` — [Render's automatic runtime commit](https://render.com/docs/environment-variables).
+4. `RAILWAY_GIT_COMMIT_SHA` — [Railway deployments triggered by GitHub](https://docs.railway.com/variables/reference).
+5. `HEROKU_BUILD_COMMIT`, then `HEROKU_SLUG_COMMIT` — [Heroku dyno metadata](https://devcenter.heroku.com/articles/dyno-metadata); metadata features must be enabled, and the slug variable is deprecated.
+6. `KAMAL_VERSION` — [Kamal's application-container version](https://github.com/basecamp/kamal/blob/master/lib/kamal/commands/app.rb), only when it is a full 40- or 64-character Git commit SHA.
+7. The `REVISION` file inside `Rails.root` — for [Hatchbox deployments](https://jumpstartrails.com/discussions/appsignal-deploy-tracking) and other deployers that write this file.
+
+Values are trimmed. The revision file is read once when configuration is created,
+with a 500-byte limit; absent, blank, oversized, unreadable, or invalidly encoded
+files are ignored. Detection does not run Git or inspect the working directory.
+If no release is available, it remains unset and telemetry is still delivered.
+Provider-specific metadata availability depends on the deployment type; there
+is no universal runtime variable. Build-only and instance-specific IDs are not
+used automatically. `HEROKU_RELEASE_VERSION`, arbitrary Kamal version labels,
+and [Fly.io's `FLY_IMAGE_REF`](https://fly.io/docs/machines/runtime-environment/)
+are also ignored: they can identify deployments or images rather than Git
+revisions, while Assist uses releases to locate the corresponding code. Explicit
+release overrides should identify a commit or ref in the connected repository. For DigitalOcean App Platform, commit metadata is a
+[bindable value](https://docs.digitalocean.com/products/app-platform/how-to/use-environment-variables/),
+not an automatically named runtime variable; optionally bind it to `GIT_REVISION`.
+
+Explicit `config.endpoint` and `config.release` assignments still take precedence.
+When upgrading an existing generated initializer, remove the old endpoint/release
+assignments that directly read `ENV` so they do not overwrite the new defaults
+with `nil` or bypass platform detection. The installer preserves existing files.
+The doctor reports whether the effective endpoint, key, and release are present,
+without printing credential values or contacting the server.
 
 ## Verify the connection
 

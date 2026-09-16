@@ -2,6 +2,7 @@ source "https://rubygems.org"
 gemspec
 gem "rake"
 gem "minitest", ">= 5.20"
+gem "minitest-mock", "~> 5.27"
 gem "activejob", "~> 8.1.3"
 gem "ahoy_matey", "~> 5.5"
 gem "flipper", "~> 1.4"

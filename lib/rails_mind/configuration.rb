@@ -2,15 +2,19 @@ require "uri"
 
 module RailsMind
   class Configuration
+    DEFAULT_ENDPOINT = "https://railsmind.com".freeze
+    RELEASE_ENV_VARS = %w[RAILS_MIND_RELEASE GIT_REVISION RENDER_GIT_COMMIT
+      RAILWAY_GIT_COMMIT_SHA HEROKU_BUILD_COMMIT HEROKU_SLUG_COMMIT KAMAL_VERSION].freeze
+
     attr_accessor :endpoint, :token, :release, :apm, :errors, :analytics, :flags,
       :queue_capacity, :batch_size, :max_batch_bytes, :max_event_bytes, :flush_interval,
       :max_retries, :retry_base, :open_timeout, :read_timeout, :shutdown_timeout,
       :before_send, :capture_exception_message
 
-    def initialize
-      @endpoint = ENV["RAILS_MIND_ENDPOINT"]
-      @token = ENV["RAILS_MIND_KEY"]
-      @release = ENV["RAILS_MIND_RELEASE"] || ENV["GIT_REVISION"]
+    def initialize(env: ENV, root: nil)
+      @endpoint = nonblank(env["RAILS_MIND_ENDPOINT"]) || DEFAULT_ENDPOINT
+      @token = env["RAILS_MIND_KEY"]
+      @release = release_from_env(env) || release_from_file(root)
       @apm = @errors = @analytics = @flags = true
       @queue_capacity = 1_000
       @batch_size = 100
@@ -25,7 +29,7 @@ module RailsMind
       @capture_exception_message = false
     end
 
-    def enabled? = !token.to_s.empty? && !endpoint.to_s.empty?
+    def enabled? = !token.to_s.strip.empty? && !endpoint.to_s.strip.empty?
 
     def validate!
       return self unless enabled?
@@ -41,6 +45,37 @@ module RailsMind
         raise ArgumentError, "timeouts must be positive" unless value.positive?
       end
       self
+    end
+
+    private
+
+    def nonblank(value)
+      value = value.to_s.strip
+      value unless value.empty?
+    end
+
+    def release_from_env(env)
+      RELEASE_ENV_VARS.each do |name|
+        value = nonblank(env[name])
+        next unless value
+        # Kamal permits arbitrary version labels; Assist needs a Git revision.
+        next if name == "KAMAL_VERSION" && !value.match?(/\A(?:[a-f0-9]{40}|[a-f0-9]{64})\z/i)
+        return value
+      end
+      nil
+    end
+
+    def release_from_file(root)
+      root ||= Rails.root if defined?(Rails) && Rails.respond_to?(:root)
+      return unless root
+      path = File.join(root, "REVISION")
+      return unless File.file?(path)
+      # Hatchbox/Capistrano deployments may have no Git checkout at runtime.
+      value = File.read(path, 501).force_encoding(Encoding::UTF_8)
+      return if value.bytesize > 500 || !value.valid_encoding?
+      nonblank(value)
+    rescue SystemCallError, IOError
+      nil
     end
   end
 end

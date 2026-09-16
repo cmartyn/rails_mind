@@ -25,6 +25,17 @@ class InstallationCheckTest < SDKTest
     refute result[:success]
     assert_nil result[:check_id]
     assert_empty transport.bodies
+    assert_includes result[:message], "Set RAILS_MIND_KEY"
+    refute_includes result[:message], "Set RAILS_MIND_ENDPOINT"
+  end
+
+  def test_hosted_defaults_allow_verification_with_only_a_key
+    config = RailsMind::Configuration.new(env: { "RAILS_MIND_KEY" => "test-only" })
+    transport = ScriptedTransport.new
+    result = RailsMind::InstallationCheck.new(config, transport: transport).run
+    assert result[:success], result[:message]
+    assert_equal "https://railsmind.com", config.endpoint
+    assert_equal 1, transport.bodies.size
   end
 
   def test_permanent_rejection_is_a_failed_check_even_when_flush_finishes

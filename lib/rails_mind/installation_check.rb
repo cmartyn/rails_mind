@@ -7,7 +7,7 @@ module RailsMind
     end
 
     def run(timeout: 10)
-      return result(false, "Set RAILS_MIND_ENDPOINT and RAILS_MIND_KEY in your app's environment, then try again.") unless @config.enabled?
+      return result(false, "Set RAILS_MIND_KEY in your app's environment, then try again. The endpoint defaults to https://railsmind.com; if you override it, provide a nonblank endpoint.") unless @config.enabled?
       @config.validate!
       # A dedicated collector gives this command an exact result without flushing
       # or changing the running application's collector or its existing counters.

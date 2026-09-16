@@ -1,7 +1,9 @@
 RailsMind.configure do |config|
-  config.endpoint = ENV["RAILS_MIND_ENDPOINT"]
   config.token = ENV["RAILS_MIND_KEY"] # Environment-scoped server credential. Never expose to browsers.
-  config.release = ENV["RAILS_MIND_RELEASE"] || ENV["GIT_REVISION"]
+
+  # Endpoint defaults to https://railsmind.com; RAILS_MIND_ENDPOINT overrides it.
+  # Release is detected from hosting metadata or Rails.root/REVISION when available.
+  # RAILS_MIND_RELEASE is an optional override. Neither variable is required.
 
   # Optional capabilities can be switched off independently.
   # config.apm = false
