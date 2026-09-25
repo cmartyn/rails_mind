@@ -1,12 +1,15 @@
 # Customer SDK
 
-The prototype gem is `rails_mind`, namespace `RailsMind`. It is not published. Install from the private [SDK repository](https://github.com/cmartyn/rails_mind) while evaluating it. Your Git credentials need access; commit the application lockfile to retain the selected revision.
+The gem is `rails_mind`, namespace `RailsMind`. Install the MIT-licensed client
+from RubyGems.org and commit the application lockfile to retain the selected
+version. The hosted RailsMind service is a separate, proprietary application.
+Version 0.1.0 is an early release with the [documented compatibility limits](compatibility.md).
 
 ## Install
 
 ```ruby
 # Customer Gemfile
-gem "rails_mind", git: "https://github.com/cmartyn/rails_mind.git", branch: "main"
+gem "rails_mind", "~> 0.1.0"
 ```
 
 ```sh
@@ -157,7 +160,15 @@ This store requires no growing analytics tables. It does not offer database-back
 
 ## OpenTelemetry
 
-Use selected tracing libraries, not `use_all`. For a new setup, see the [sample initializer](https://github.com/cmartyn/mind/blob/main/sample/config/initializers/opentelemetry.rb): Rack, ActionPack, ActionView, ActiveJob, PG, and Net::HTTP. PG is configured with `db_statement: :omit`. Avoid additionally instrumenting the same SQL operation at both ActiveRecord and PG layers. The Rails aggregate instrumentation package loads component libraries; selecting only the Rails package itself does not activate the child integrations. [Ruby instrumentation](https://opentelemetry.io/docs/languages/ruby/instrumentation/), [PG instrumentation source](https://github.com/open-telemetry/opentelemetry-ruby-contrib/tree/main/instrumentation/pg).
+Use selected tracing libraries, not `use_all`. The locally verified setup uses
+Rack, ActionPack, ActionView, ActiveJob, PG, and Net::HTTP, with PG configured as
+`db_statement: :omit`. Avoid additionally instrumenting the same SQL operation
+at both ActiveRecord and PG layers. The Rails aggregate instrumentation package
+loads component libraries; selecting only the Rails package itself does not
+activate the child integrations. Follow the public
+[Ruby instrumentation guide](https://opentelemetry.io/docs/languages/ruby/instrumentation/)
+and [PG instrumentation documentation](https://github.com/open-telemetry/opentelemetry-ruby-contrib/tree/main/instrumentation/pg)
+for your application's setup.
 
 An existing provider remains authoritative:
 
@@ -208,4 +219,7 @@ The final local synthetic burst benchmark on Ruby 4.0.6 processed 10,000 calls i
 
 On 2026-09-14 the real sample Rails application sent 101 events through this SDK's HTTP transport to the local hosted ingestion API; GoodJob processed all 101. They included 90 spans, 3 requests, 3 business events, 2 Flipper observations, 1 visit, 1 error, and 1 job. There were no collector drops or retries. The intentional error shared its request's trace and account IDs. Every request/business/error/flag/job event had account context; the visit and some early spans preceded identity and therefore did not. The list reported seven repeated queries. Credential-key privacy probes arrived as `[FILTERED]` without their secret values.
 
-The verification script is in the separate [sample app](https://github.com/cmartyn/mind/blob/main/sample/script/verify_delivery.rb); it reads a key from `RAILS_MIND_KEY_FILE`, sends only to the configured endpoint, prints no credential, and marks events with a `sample-verification-*` release. External hosted deployment and published-gem installation remain unverified.
+This historical check used an internal sample application that is not included
+in the public client repository. To verify your own installation, follow
+[Verify the connection](#verify-the-connection). External hosted deployment and
+published-gem installation remain unverified by that historical check.

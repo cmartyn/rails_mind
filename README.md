@@ -1,15 +1,19 @@
 # RailsMind SDK
 
-One bounded collector for Rails requests, errors, jobs, Ahoy events, Flipper observations, and selected OpenTelemetry spans. Prototype version 0.1.0; unpublished.
+The MIT-licensed Ruby client for [RailsMind](https://railsmind.com). One bounded
+collector for Rails requests, errors, jobs, Ahoy events, Flipper observations,
+and selected OpenTelemetry spans. Version 0.1.0 is an early release; see
+[compatibility and validation limits](docs/compatibility.md).
 
 ```ruby
-gem "rails_mind", git: "https://github.com/cmartyn/rails_mind.git", branch: "main"
+gem "rails_mind", "~> 0.1.0"
 ```
 
-This is the canonical SDK repository. It is private during the pilot: your Git
-credentials must have access. Commit your application's `Gemfile.lock` to pin the
-resolved revision; use a reviewed `ref:` commit for deployment updates. See
-[development and repository access](CONTRIBUTING.md).
+Install from RubyGems.org and commit your application's `Gemfile.lock` to pin the
+resolved version. This repository contains the open-source client library. The
+hosted RailsMind service is a separate, proprietary application; its source is
+not included or licensed by this repository. See [development](CONTRIBUTING.md)
+and [release notes](CHANGELOG.md).
 
 ```sh
 bundle install
@@ -40,7 +44,7 @@ RailsMind.with_context(user_id: current_user.id.to_s, account_id: current_accoun
 end
 ```
 
-See [installation and privacy](docs/sdk.md), [compatibility](docs/compatibility.md), and the [sample app](https://github.com/cmartyn/mind/tree/main/sample).
+See [installation and privacy](docs/sdk.md) and [compatibility](docs/compatibility.md).
 
 Tests:
 
