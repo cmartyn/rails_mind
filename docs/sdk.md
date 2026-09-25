@@ -7,10 +7,6 @@ Version 0.1.0 is an early release with the [documented compatibility limits](com
 
 ## Install
 
-RubyGems publication of 0.1.0 is pending. Use the public GitHub installation
-command in the [README](../README.md) until it is available. The RubyGems
-installation command for the release will be:
-
 ```ruby
 # Customer Gemfile
 gem "rails_mind", "~> 0.1.0"

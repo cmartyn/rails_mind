@@ -5,15 +5,6 @@ collector for Rails requests, errors, jobs, Ahoy events, Flipper observations,
 and selected OpenTelemetry spans. Version 0.1.0 is an early release; see
 [compatibility and validation limits](docs/compatibility.md).
 
-RubyGems publication of 0.1.0 is pending. Until it is available, install the
-reviewed public GitHub revision:
-
-```ruby
-gem "rails_mind", git: "https://github.com/cmartyn/rails_mind.git", ref: "8c2c610ed0fb64502eaeabbc19c8893d9d0da113"
-```
-
-Once 0.1.0 is published on RubyGems.org, use:
-
 ```ruby
 gem "rails_mind", "~> 0.1.0"
 ```
