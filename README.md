@@ -2,11 +2,11 @@
 
 The MIT-licensed Ruby client for [RailsMind](https://railsmind.com). One bounded
 collector for Rails requests, errors, jobs, Ahoy events, Flipper observations,
-and selected OpenTelemetry spans. Version 0.1.0 is an early release; see
+and selected OpenTelemetry spans. Version 0.2.0 is an early release; see
 [compatibility and validation limits](docs/compatibility.md).
 
 ```ruby
-gem "rails_mind", "~> 0.1.0"
+gem "rails_mind", "~> 0.2.0"
 ```
 
 Install from RubyGems.org and commit your application's `Gemfile.lock` to pin the
@@ -45,6 +45,11 @@ end
 ```
 
 See [installation and privacy](docs/sdk.md) and [compatibility](docs/compatibility.md).
+
+Connect Claude Code or Codex with `bin/rails generate rails_mind:agent --plan`.
+Choose an environment-variable API token or Rails encrypted credentials, then
+follow the [agent setup guide](docs/agents.md) from first connection to a reported
+PR and deployment confirmation. Requires rails_mind 0.2.0 or later.
 
 Tests:
 

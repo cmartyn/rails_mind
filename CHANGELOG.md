@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 — Unreleased
+
+- Connect Claude Code and Codex with `rails_mind:agent`, including a write-free preview, preserved existing configuration, and shared agent instructions.
+- Choose an environment-variable API token or a local Rails encrypted-credentials helper; check readiness without displaying the token.
+- Document the full agent handoff: read findings, follow a brief, report a PR, and watch deployment and recurrence in RailsMind.
+
 ## 0.1.0 — 2026-09-25
 
 Initial public release of the RailsMind client under the MIT license.

@@ -64,3 +64,16 @@ and Node 22:
 These checks cover the client package and its documented integrations locally.
 They do not certify other browsers, every allowed Ruby/Rails combination,
 production delivery guarantees, or a deployed customer application's setup.
+
+## 0.2.0 agent setup verification
+
+The agent generator and encrypted-credentials helper are tested with Ruby 4.0.7
+and Rails/Active Support 8.1.3.1. Tests cover preview/repeatability, preservation of
+existing MCP and instruction files, shared and environment-specific credentials,
+custom paths, safe diagnostics, environment-variable precedence, and packaged
+files. The helper loads Active Support without initializing the application.
+
+Client configuration uses the documented Claude Code `headersHelper` and Codex
+`http_headers_helper` interfaces. These tests do not certify every desktop, IDE,
+cloud or older client version; verify read access in your agent after setup. See
+[agent setup and limitations](agents.md#supported-surfaces-and-verification-limits).

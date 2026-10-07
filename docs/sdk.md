@@ -3,13 +3,13 @@
 The gem is `rails_mind`, namespace `RailsMind`. Install the MIT-licensed client
 from RubyGems.org and commit the application lockfile to retain the selected
 version. The hosted RailsMind service is a separate, proprietary application.
-Version 0.1.0 is an early release with the [documented compatibility limits](compatibility.md).
+Version 0.2.0 is an early release with the [documented compatibility limits](compatibility.md).
 
 ## Install
 
 ```ruby
 # Customer Gemfile
-gem "rails_mind", "~> 0.1.0"
+gem "rails_mind", "~> 0.2.0"
 ```
 
 ```sh
@@ -223,3 +223,10 @@ This historical check used an internal sample application that is not included
 in the public client repository. To verify your own installation, follow
 [Verify the connection](#verify-the-connection). External hosted deployment and
 published-gem installation remain unverified by that historical check.
+
+## Connect your coding agent
+
+Run `bin/rails generate rails_mind:agent --plan` to preview the connection setup.
+The [agent guide](agents.md) covers Claude Code and Codex, environment-variable and
+Rails credentials authentication, safe verification, and the complete fix journey.
+The agent API token is separate from `RAILS_MIND_KEY`, the ingestion key above.
