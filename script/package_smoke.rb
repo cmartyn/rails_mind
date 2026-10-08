@@ -17,6 +17,8 @@ Dir.chdir(File.expand_path("..", __dir__)) do
       expected = File.join(ARGV.fetch(0), "lib/rails_mind.rb")
       abort "Loaded SDK from the checkout instead of the package" unless loaded && File.realpath(loaded) == File.realpath(expected)
       require_relative "test/generator_test"
+      require_relative "test/agent_generator_test"
+      require_relative "test/agent_headers_test"
     CHECK
     environment = { "GEM_HOME" => tmp, "GEM_PATH" => ([tmp] + Gem.path).join(File::PATH_SEPARATOR) }
     success = Bundler.with_unbundled_env do

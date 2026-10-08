@@ -22,6 +22,10 @@ module RailsMind
         end
       end
 
+      def connect_agent_hint
+        say "Connect your coding agent: bin/rails generate rails_mind:agent --plan"
+      end
+
       def add_browser_adapter
         return if options[:plan] || !options[:browser]
         path = "app/javascript/rails_mind.js"
