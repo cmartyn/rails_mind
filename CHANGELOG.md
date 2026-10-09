@@ -1,7 +1,10 @@
 # Changelog
 
-## 0.2.0 — Unreleased
+## 0.2.0 — 2026-10-09
 
+- Correlate requests, serialized ActiveJob executions, and mailer attempts with native trace IDs while preserving existing OpenTelemetry context.
+- Observe job enqueue/start, retry/discard, and completion without changing existing job-count semantics; distinguish total queue delay from delay after a scheduled job becomes eligible.
+- Observe Action Mailer processing, ordinary/forced delivery attempts, disabled delivery, callback aborts, and exposed failures. Collect only bounded lifecycle metadata, excluding recipients, subjects, message bodies, attachments, and arguments. Recipient delivery remains unknown.
 - Connect Claude Code and Codex with `rails_mind:agent`, including a write-free preview, preserved existing configuration, and shared agent instructions.
 - Choose an environment-variable API token or a local Rails encrypted-credentials helper; check readiness without displaying the token.
 - Document the full agent handoff: read findings, follow a brief, report a PR, and watch deployment and recurrence in RailsMind.

@@ -19,11 +19,21 @@ Dir.chdir(File.expand_path("..", __dir__)) do
       require_relative "test/generator_test"
       require_relative "test/agent_generator_test"
       require_relative "test/agent_headers_test"
+      require_relative "test/context_test"
+      require_relative "test/job_lifecycle_test"
+      require_relative "test/action_mailer_test"
+      require_relative "test/rails_integrations_test"
+      %w[context integrations/rails integrations/action_mailer].each do |feature|
+        suffix = "/lib/rails_mind/#{feature}.rb"
+        actual = $LOADED_FEATURES.find { |path| path.end_with?(suffix) }
+        expected = File.join(ARGV.fetch(0), "lib/rails_mind/#{feature}.rb")
+        abort "Loaded #{feature} from outside the package" unless actual && File.realpath(actual) == File.realpath(expected)
+      end
     CHECK
     environment = { "GEM_HOME" => tmp, "GEM_PATH" => ([tmp] + Gem.path).join(File::PATH_SEPARATOR) }
     success = Bundler.with_unbundled_env do
       system(environment, RbConfig.ruby, "-I", "test", "-e", check, installed.full_gem_path)
     end
-    abort "Packaged SDK installer check failed" unless success
+    abort "Packaged SDK checks failed" unless success
   end
 end

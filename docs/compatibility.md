@@ -38,9 +38,9 @@ node --test javascript/rails_mind.test.js
 bundle exec ruby script/package_smoke.rb
 ```
 
-CI runs Ruby 4.0.6 / Rails 8.1.3.1 on Linux, plus browser adapter contract tests
+CI runs Ruby 4.0.6 / the locked Rails 8.1.4 dependencies on Linux, plus browser adapter contract tests
 on Node 22. The package smoke check builds and installs a gem in a temporary directory, loads that copy,
-and runs the installer against its packaged templates and browser adapter.
+and runs the installer and native workflow tests against its packaged files.
 The sample app remains in the hosted application's repository with its own lockfile.
 
 ## 0.1.0 release verification
@@ -77,3 +77,20 @@ Client configuration uses the documented Claude Code `headersHelper` and Codex
 `http_headers_helper` interfaces. These tests do not certify every desktop, IDE,
 cloud or older client version; verify read access in your agent after setup. See
 [agent setup and limitations](agents.md#supported-surfaces-and-verification-limits).
+
+## 0.2.0 workflow observation verification
+
+The native context, ActiveJob, and Action Mailer tests run with Ruby 4.0.7,
+Rails/ActiveJob/ActionMailer 8.1.4, and Mail 2.9.1. They cover serialized jobs,
+retries/discards, enqueue aborts/errors, schedule-aware delay, context restoration,
+ordinary/forced mail, disabled transport, hidden/raised transport errors, callback
+aborts/failures, lazy rendering, repeated attempts, existing OpenTelemetry, and
+collector failures. Auxiliary mail sent inside callbacks does not inherit the
+forced ActionMailer attempt. Tests use an in-memory collector and test/failing
+transports; they do not send external email.
+
+Older gem-permitted Rails versions remain uncertified. Provider acceptance,
+recipient inbox delivery, direct backend jobs, direct provider HTTP sends, and
+durable workflow completeness are outside this contract. Validate the released
+SDK against your app's queue, callback ordering, and delivery adapter. The hosted
+service exposes bounded workflow metadata and leaves recipient delivery unknown.
