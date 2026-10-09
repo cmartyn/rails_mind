@@ -5,7 +5,7 @@ Gem::Specification.new do |spec|
   spec.version = RailsMind::VERSION
   spec.authors = [ "RailsMind" ]
   spec.summary = "Bounded Rails telemetry for RailsMind"
-  spec.description = "The RailsMind client for Rails request, error, job, and business-event telemetry, " \
+  spec.description = "The RailsMind client for Rails request, error, job, mailer, and business-event telemetry, " \
     "with optional Ahoy, Flipper, OpenTelemetry, and browser integrations."
   spec.license = "MIT"
   spec.homepage = "https://github.com/cmartyn/rails_mind"

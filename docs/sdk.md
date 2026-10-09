@@ -131,7 +131,7 @@ RailsMind.capture_exception(error, handled: true)
 
 Context is fiber-local and restored around requests/jobs. `identify` replaces the three identity values, so call it with all available values; passing nil clears that value. Preserve Ahoy's visitor ID when a visitor logs in, and emit `$identify` through Ahoy authentication to connect later events. Account IDs represent the current tenant, never a guessed company from email. Logout/account switching must update identity; a new request starts clean. Historical anonymous events are not rewritten or merged across accounts by the SDK.
 
-ActiveJob serializes only the context identifier allowlist under `rails_mind_context`, then restores it while executing. Arguments are not inspected. This covers GoodJob through ActiveJob; direct Sidekiq jobs require a future explicit integration. Distributed trace propagation belongs to the existing OpenTelemetry library; choose ActiveJob `propagation_style: :child` for a linked trace tree when configuring a new provider.
+ActiveJob serializes only the context identifier allowlist under `rails_mind_context`, then restores it while executing. Arguments are not inspected. This covers GoodJob through ActiveJob; direct Sidekiq jobs require a future explicit integration. Without OpenTelemetry, RailsMind creates a trace ID at a request, job, or mailer boundary and carries it across serialized ActiveJob context. An active OpenTelemetry span remains authoritative. Native IDs correlate observations; they do not invent a distributed parent/child span tree. Cross-service propagation belongs to the existing OpenTelemetry library; choose ActiveJob `propagation_style: :child` for a linked trace tree when configuring a new provider.
 
 ## Ahoy
 
@@ -182,7 +182,57 @@ Attachment adds one idempotent processor; it does not replace the global provide
 
 Request durations/counts and error reports come independently from Rails notifications/error reporting, even when detailed traces are sampled out. Request measurements cover controller actions, not assets/health checks rejected before ActionController or streaming-body completion. Repeated-query evidence contains only normalized-query hashes and counts; it is a suspicion, not proof of an N+1. Hash normalization handles common literals, not every SQL grammar. Use Bullet/Prosopite or an explicit query-bound test in development to verify fixes. No production object scans are installed.
 
-Jobs record duration, failure/retry/discard lifecycle, execution count, queue name, and enqueue-to-start delay where ActiveJob exposes it. Scheduled delay is included in the enqueue-to-start number. Signals do not include arguments. Full metrics/logs SDK integration is deferred; v0.1 computes hosted aggregates from unsampled request events and does not capture application logs.
+Full metrics/logs SDK integration is deferred; hosted aggregates use unsampled request events and the SDK does not capture application logs.
+
+## Jobs and mailer workflows
+
+With `apm` enabled, the SDK automatically observes installed ActiveJob and Action
+Mailer components. No SMTP-provider integration or OpenTelemetry setup is required.
+It does not change the queue adapter, delivery provider, retry policy, or error
+handling. Both integrations respect `RailsMind.suppress` and the normal collector
+bounds. Request, job, and mailer identity/release context uses the existing core
+fields; job arguments and email contents are never inspected for correlation.
+
+The versioned property contract is `schema_version: 1` with `instrumentation`
+equal to `active_job` or `action_mailer`:
+
+| Component | Observations | Selected metadata |
+| --- | --- | --- |
+| ActiveJob | `enqueue`, `enqueue_at`, `perform_start`, `perform`, `enqueue_retry`, `retry_stopped`, `discard` | Class, queue, execution count, enqueue/schedule timestamps, queue delays |
+| Action Mailer | `process`, `delivery_attempt_completed`, `delivery_not_observed` | Mailer/action, opaque attempt UUID when available, transport class, ordinary/forced invocation, delivery flags, exposed exception class |
+
+New enqueue/start and mailer observations use `span`, so they do not inflate
+business-event counts or the existing `job` execution/retry/discard feed. A
+render-only mailer has a processing observation, not a delivery attempt. The
+attempt UUID groups processing with its delivery invocation; retries create new
+attempt UUIDs while the serialized job retains its correlation identifiers.
+
+`queue_delay_ms` measures enqueue to execution start, including intentional
+scheduling. `eligible_queue_delay_ms` subtracts intentional scheduling when the
+required timestamps are available, with a zero floor. Missing timestamps remain
+unknown. Retry handlers keep execution context after normal perform callbacks
+unwind. These notifications are best-effort observations, not a durable queue
+ledger: bulk/direct backend APIs may bypass them, and a missing completion does
+not by itself prove a stuck job.
+
+Mailer status describes local evidence. `observed` means the local call or
+notification completed; `disabled` identifies ordinary delivery with
+`perform_deliveries: false`; `error` requires an exposed exception. A callback
+abort or other invocation that never reaches the transport is recorded as
+`delivery_not_observed`, with `aborted`, `error`, or `unknown` as appropriate.
+Forced delivery bypasses normal delivery flags and is observed separately.
+Hidden transport failures (`raise_delivery_errors: false`) can still produce an
+`observed` result. None of these establishes provider acceptance or inbox
+arrival; recipient delivery remains unknown.
+
+The SDK excludes recipients, sender addresses, subjects, bodies, attachments,
+message IDs/headers, mailer/job arguments, credentials, and provider responses.
+Only transport class names are selected, never transport settings. Rendering a
+mailer and sending its content through a separate HTTP provider client produces
+only the rendering evidence; add explicit reviewed app events or provider
+callbacks if later delivery facts are needed. Keep real product outcomes such
+as invitation acceptance separate, using explicit events after persistence.
+
 
 ## Flipper and browser behavior
 

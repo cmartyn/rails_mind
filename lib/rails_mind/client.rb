@@ -114,10 +114,7 @@ module RailsMind
     end
 
     def otel_context
-      return {} unless defined?(::OpenTelemetry::Trace)
-      context = ::OpenTelemetry::Trace.current_span.context
-      return {} unless context.valid?
-      { trace_id: context.hex_trace_id, span_id: context.hex_span_id }
+      Context.otel_context
     end
   end
 end

@@ -14,17 +14,18 @@ module RailsMind
 
       def call(env)
         Context.with(request_id: env["action_dispatch.request_id"] || SecureRandom.uuid) do
-          previous = Thread.current[:rails_mind_queries]
-          Thread.current[:rails_mind_queries] = { count: 0, fingerprints: Hash.new(0) }
-          @app.call(env)
-        rescue StandardError => error
-          # Preserve identity before this request boundary unwinds. The Rails
-          # reporter may observe the same exception later; object dedup prevents
-          # a second RailsMind event while other reporters remain unaffected.
-          RailsMind.capture_exception(error, source: "rack")
-          raise
-        ensure
-          Thread.current[:rails_mind_queries] = previous
+          Context.with_trace do
+            previous = Thread.current[:rails_mind_queries]
+            Thread.current[:rails_mind_queries] = { count: 0, fingerprints: Hash.new(0) }
+            @app.call(env)
+          rescue StandardError => error
+            # Capture identity before this request boundary unwinds. Object
+            # dedup still leaves other error reporters unaffected.
+            RailsMind.capture_exception(error, source: "rack")
+            raise
+          ensure
+            Thread.current[:rails_mind_queries] = previous
+          end
         end
       end
     end
@@ -32,16 +33,37 @@ module RailsMind
     module JobContext
       def self.included(base)
         base.around_enqueue do |job, block|
-          job.rails_mind_context = Context.snapshot.transform_keys(&:to_s)
-          block.call
+          Context.with_trace do
+            job.rails_mind_context = Context.effective_snapshot.transform_keys(&:to_s)
+            block.call
+          end
         end
         base.around_perform do |job, block|
-          job.rails_mind_started_at = Time.now
-          Context.with((job.rails_mind_context || {}).merge("job_id" => job.job_id)) { block.call }
+          job.rails_mind_started_at ||= Time.now
+          Context.with((job.rails_mind_context || {}).merge("job_id" => job.job_id)) do
+            Context.with_trace do
+              job.rails_mind_context = Context.effective_snapshot.transform_keys(&:to_s)
+              block.call
+            end
+          end
         end
       end
 
-      attr_accessor :rails_mind_context, :rails_mind_started_at
+      attr_accessor :rails_mind_context, :rails_mind_started_at, :rails_mind_execution_timing
+
+      # ActiveJob runs retry/discard handlers after around_perform has unwound.
+      # Keep the restored boundary around the entire execution so those handlers
+      # and their newly serialized attempts retain the originating trace.
+      def perform_now(...)
+        self.rails_mind_started_at = nil
+        self.rails_mind_execution_timing = nil
+        Context.with((rails_mind_context || {}).merge("job_id" => job_id)) do
+          Context.with_trace do
+            self.rails_mind_context = Context.effective_snapshot.transform_keys(&:to_s)
+            super
+          end
+        end
+      end
 
       def serialize = super.merge("rails_mind_context" => rails_mind_context || {})
 
@@ -76,17 +98,38 @@ module RailsMind
             fingerprint = Digest::SHA256.hexdigest(normalized)[0, 24]
             queries[:fingerprints][fingerprint] += 1 if queries[:fingerprints].key?(fingerprint) || queries[:fingerprints].size < 100
           end
-          %w[perform.active_job enqueue_retry.active_job retry_stopped.active_job discard.active_job].each do |name|
+          %w[enqueue.active_job enqueue_at.active_job perform_start.active_job perform.active_job enqueue_retry.active_job retry_stopped.active_job discard.active_job].each do |name|
             subscribe(name) do |event|
               job = event.payload[:job]
               next unless job
-              error = event.payload[:exception_object] || event.payload[:error]
-              Context.with((job.rails_mind_context || {}).merge("job_id" => job.job_id)) do
-                RailsMind.client.emit(:job, job.class.name, duration_ms: event.duration,
-                  status: error ? "error" : (name == "perform.active_job" ? "ok" : name.split(".").first),
-                  properties: { operation: name.split(".").first, queue: job.queue_name, executions: job.executions,
-                    queue_delay_ms: job.enqueued_at && job.rails_mind_started_at ? [ (job.rails_mind_started_at.to_f - job.enqueued_at.to_f) * 1000, 0 ].max : nil })
-                RailsMind.capture_exception(error, source: "active_job") if error
+              operation = name.split(".").first
+              enqueue = %w[enqueue enqueue_at].include?(operation)
+              error = event.payload[:exception_object] || event.payload[:error] || (job.enqueue_error if enqueue)
+              if operation == "perform_start"
+                job.rails_mind_started_at = Time.now
+                job.rails_mind_execution_timing = { enqueued_at: job.enqueued_at, scheduled_at: job.scheduled_at }
+              end
+              # A callback may abort before the SDK's around_enqueue is entered.
+              values = job.rails_mind_context || Context.effective_snapshot
+              Context.with(values.merge("job_id" => job.job_id)) do
+                Context.with_trace do
+                  job.rails_mind_context = Context.effective_snapshot.transform_keys(&:to_s)
+                  status = if error
+                    "error"
+                  elsif event.payload[:aborted]
+                    "aborted"
+                  elsif enqueue
+                    "enqueued"
+                  elsif operation == "perform_start"
+                    "started"
+                  else
+                    operation == "perform" ? "ok" : operation
+                  end
+                  kind = enqueue || operation == "perform_start" ? :span : :job
+                  RailsMind.client.emit(kind, job.class.name, duration_ms: event.duration, status: status,
+                    properties: job_properties(job, operation))
+                  RailsMind.capture_exception(error, source: "active_job") if error
+                end
               end
             end
           end
@@ -106,6 +149,29 @@ module RailsMind
         end
 
         private
+
+        def job_properties(job, operation)
+          timing = if %w[perform_start perform].include?(operation)
+            job.rails_mind_execution_timing || {}
+          else
+            { enqueued_at: job.enqueued_at, scheduled_at: job.scheduled_at }
+          end
+          enqueued_at, scheduled_at = timing.values_at(:enqueued_at, :scheduled_at)
+          execution_timing = job.rails_mind_execution_timing || {}
+          queued = execution_timing[:enqueued_at]
+          scheduled = execution_timing[:scheduled_at]
+          started = job.rails_mind_started_at
+          properties = { instrumentation: "active_job", schema_version: 1, operation: operation,
+            job_class: job.class.name, queue: job.queue_name, executions: job.executions,
+            enqueued_at: enqueued_at&.iso8601(6), scheduled_at: scheduled_at&.iso8601(6) }
+          unless %w[enqueue enqueue_at].include?(operation)
+            properties[:queue_delay_ms] = [ (started.to_f - queued.to_f) * 1000, 0 ].max if started && queued
+            if started && queued && scheduled
+              properties[:eligible_queue_delay_ms] = [ (started.to_f - [ queued.to_f, scheduled.to_f ].max) * 1000, 0 ].max
+            end
+          end
+          properties.compact
+        end
 
         def subscribe(name, &callback)
           @subscriptions << ActiveSupport::Notifications.subscribe(name) do |event|

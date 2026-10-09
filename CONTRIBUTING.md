@@ -6,7 +6,7 @@ sample are maintained separately and remain proprietary.
 
 ## Setup
 
-Use Ruby 4.0.6 and Node 22 for the currently verified combination.
+CI uses Ruby 4.0.6 and Node 22. Native workflow tests have also been run locally on Ruby 4.0.7; use the committed lockfile.
 
 ```sh
 git clone https://github.com/cmartyn/rails_mind.git
@@ -37,7 +37,7 @@ read this public repository.
 ## Packaging and releases
 
 `bundle exec ruby script/package_smoke.rb` builds a temporary gem and exercises its
-packaged installer and browser files. `bundle exec rake build` writes the gem to
+packaged installer, browser files, and native workflow integrations. `bundle exec rake build` writes the gem to
 `pkg/`. Neither command publishes anything.
 
 Publishing uses [RubyGems trusted publishing](https://guides.rubygems.org/trusted-publishing/)
@@ -66,8 +66,8 @@ customer application.
 Create an annotated tag matching the gem version and push it:
 
 ```sh
-git tag -a v0.1.0 -m "Release rails_mind 0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "Release rails_mind 0.2.0"
+git push origin v0.2.0
 ```
 
 The workflow verifies the tag/version, reruns the Ruby, JavaScript, and package

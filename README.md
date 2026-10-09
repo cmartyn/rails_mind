@@ -1,8 +1,8 @@
 # RailsMind SDK
 
 The MIT-licensed Ruby client for [RailsMind](https://railsmind.com). One bounded
-collector for Rails requests, errors, jobs, Ahoy events, Flipper observations,
-and selected OpenTelemetry spans. Version 0.2.0 is an early release; see
+collector for Rails requests, errors, jobs, mailer attempts, Ahoy events, Flipper
+observations, and selected OpenTelemetry spans. Version 0.2.0 is an early release; see
 [compatibility and validation limits](docs/compatibility.md).
 
 ```ruby
@@ -43,6 +43,12 @@ RailsMind.with_context(user_id: current_user.id.to_s, account_id: current_accoun
   RailsMind.track("Invoice paid", invoice_id: invoice.id, amount_cents: invoice.amount_cents)
 end
 ```
+
+Requests, ActiveJob executions, and Action Mailer attempts share native trace
+context without requiring OpenTelemetry. Existing OpenTelemetry context stays
+authoritative. Mail observations contain class/action, timing, and attempt
+metadata, never recipients or rendered content; an attempt is not proof of inbox
+delivery. See [workflow observations](docs/sdk.md#jobs-and-mailer-workflows).
 
 See [installation and privacy](docs/sdk.md) and [compatibility](docs/compatibility.md).
 
