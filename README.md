@@ -2,11 +2,11 @@
 
 The MIT-licensed Ruby client for [RailsMind](https://railsmind.com). One bounded
 collector for Rails requests, errors, jobs, mailer attempts, Ahoy events, Flipper
-observations, and selected OpenTelemetry spans. Version 0.2.0 is an early release; see
+observations, and selected OpenTelemetry spans. Version 0.3.0 is an early release; see
 [compatibility and validation limits](docs/compatibility.md).
 
 ```ruby
-gem "rails_mind", "~> 0.2.0"
+gem "rails_mind", "~> 0.3.0"
 ```
 
 Install from RubyGems.org and commit your application's `Gemfile.lock` to pin the
@@ -67,4 +67,4 @@ bundle exec ruby script/package_smoke.rb
 ruby script_benchmark.rb
 ```
 
-Business/request/error events are unsampled, but delivery is best effort. Check `RailsMind.stats` for losses. The SDK does not guarantee durable business-event counts; use a transactional outbox when that is required.
+Automatic endpoint sampling is enabled by default. The hosted policy can reduce routine successful requests while preserving failed, slow, or repeated-query requests and all other signal kinds from sampling. Business/error events remain unsampled; bounded queues and delivery are still best effort. See [sampling and coverage](docs/sdk.md#automatic-endpoint-sampling) and inspect `RailsMind.stats`. Use a transactional outbox when durable business-event delivery is required.

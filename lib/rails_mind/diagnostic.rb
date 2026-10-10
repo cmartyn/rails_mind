@@ -21,15 +21,16 @@ module RailsMind
         endpoint_present: !@config.endpoint.to_s.strip.empty?,
         release_present: !@config.release.to_s.strip.empty?,
         enabled: @config.enabled?,
+        automatic_sampling: @config.automatic_sampling,
         plan: [
           "Add one initializer. No database migrations or Gemfile changes.",
-          "Requests and jobs: unsampled measurements via Rails notifications; errors via Rails.error.",
+          "Requests: automatic sampling of routine successes; jobs via Rails notifications and errors via Rails.error stay unsampled.",
           detected["ahoy_matey"] ? "Ahoy detected: keep current store; explicitly opt into mirror mode after review." : "Analytics: optionally add ahoy_matey; choose hosted-only store or existing database store.",
           detected["opentelemetry-sdk"] ? "OpenTelemetry detected: attach RailsMind exporter after existing SDK setup; preserve sampler and exporters." : "APM traces: optionally add selected OpenTelemetry libraries and explicitly configure one provider.",
           detected["flipper"] ? "Flipper detected: observe notifications only; preserve adapter, groups, targeting and cache." : "Flags: Flipper is optional. No flag configuration is created.",
           "Existing error reporters stay installed. RailsMind deduplicates its own collector only.",
           "Browser: optional Ahoy adapter; enable only after checking existing pageview handlers.",
-          "Business/request/error signals are not sampled; bounded queue losses remain possible. Inspect RailsMind.stats."
+          "Business/error signals are not sampled; routine requests follow the hosted policy. Local opt-out does not disable server sampling or quotas. Inspect RailsMind.stats for queue losses and unconfirmed delivery."
         ],
         limitations: [ "Compatibility applies to tested versions only; this is not a historical import.",
           "No network check is performed and credential values are never printed." ]

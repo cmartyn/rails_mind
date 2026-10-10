@@ -61,7 +61,7 @@ class CollectorTest < SDKTest
     collector.push(event)
     collector.flush(timeout: 1)
     assert_equal 1, transport.bodies.size
-    assert_equal 1, collector.stats[:losses]["event.delivery"]
+    assert_equal 1, collector.stats[:losses]["event.delivery_unconfirmed"]
     collector.shutdown
 
     transport = ScriptedTransport.new(Array.new(10) { RailsMind::Transport::Result.new(success: false, retryable: true) })
@@ -70,7 +70,8 @@ class CollectorTest < SDKTest
     collector.flush(timeout: 1)
     assert_equal 4, transport.bodies.size
     assert_equal 3, collector.stats[:retried]
-    assert_equal 1, collector.stats[:dropped]
+    assert_equal 1, collector.stats[:delivery_unconfirmed]
+    assert_equal 0, collector.stats[:dropped]
   ensure
     collector&.shutdown
   end
@@ -83,7 +84,7 @@ class CollectorTest < SDKTest
     50.times { assert collector.push(event) }
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - start, :<, 0.1
     refute collector.shutdown(timeout: 0.05)
-    assert_equal 50, collector.stats[:dropped]
+    assert_equal 50, collector.stats[:dropped] + collector.stats[:delivery_unconfirmed]
     refute collector.push(event)
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - start, :<, 0.5
   end
