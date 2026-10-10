@@ -1,4 +1,7 @@
 RailsMind.configure do |config|
+  # Enabled by default: reduce routine successful request events using hosted policy.
+  # Local opt-out does not disable server sampling or the environment daily quota.
+  # config.automatic_sampling = false
   config.token = ENV["RAILS_MIND_KEY"] # Environment-scoped server credential. Never expose to browsers.
 
   # Endpoint defaults to https://railsmind.com; RAILS_MIND_ENDPOINT overrides it.

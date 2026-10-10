@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 — 2026-10-10
+
+- Enable bounded automatic endpoint sampling for routine successful requests, driven by expiring hosted policies. Preserve slow, failed, repeated-query requests and all other signal kinds from SDK sampling.
+- Report eligible request selection and queue losses with immutable IDs and independent acknowledgments, including report-only batches at zero sampling rates. Keep old-server event delivery compatible until a v1 handshake.
+- Add explicit local opt-out, effective request metadata, bounded control parsing, fork resets, and sampling diagnostics. Local opt-out does not disable server-side sampling or quotas.
+- Separate known local drops from unconfirmed delivery; failed responses may follow partial server acceptance.
+
 ## 0.2.0 — 2026-10-09
 
 - Correlate requests, serialized ActiveJob executions, and mailer attempts with native trace IDs while preserving existing OpenTelemetry context.

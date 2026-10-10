@@ -3,13 +3,13 @@
 The gem is `rails_mind`, namespace `RailsMind`. Install the MIT-licensed client
 from RubyGems.org and commit the application lockfile to retain the selected
 version. The hosted RailsMind service is a separate, proprietary application.
-Version 0.2.0 is an early release with the [documented compatibility limits](compatibility.md).
+Version 0.3.0 is an early release with the [documented compatibility limits](compatibility.md).
 
 ## Install
 
 ```ruby
 # Customer Gemfile
-gem "rails_mind", "~> 0.2.0"
+gem "rails_mind", "~> 0.3.0"
 ```
 
 ```sh
@@ -180,9 +180,74 @@ RailsMind::Integrations::OpenTelemetry.attach!
 
 Attachment adds one idempotent processor; it does not replace the global provider, sampler, propagator, instrumentation, or other exporters. Its exporter only sanitizes and enqueues locally; the shared worker performs network I/O. Span context is attached at start so identity survives later export. Known safe attributes are allowlisted. Raw span names, exception span events, HTTP bodies/headers, SQL statements, and bind values are not exported to RailsMind. Existing third-party exporters retain their own behavior and privacy settings. [OpenTelemetry exporters](https://opentelemetry.io/docs/languages/ruby/exporters/).
 
-Request durations/counts and error reports come independently from Rails notifications/error reporting, even when detailed traces are sampled out. Request measurements cover controller actions, not assets/health checks rejected before ActionController or streaming-body completion. Repeated-query evidence contains only normalized-query hashes and counts; it is a suspicion, not proof of an N+1. Hash normalization handles common literals, not every SQL grammar. Use Bullet/Prosopite or an explicit query-bound test in development to verify fixes. No production object scans are installed.
+Request measurements and error reports come independently from Rails notifications/error reporting, even when detailed traces are sampled out. Routine requests separately follow the automatic endpoint sampling policy described below. Request measurements cover controller actions, not assets/health checks rejected before ActionController or streaming-body completion. Repeated-query evidence contains only normalized-query hashes and counts; it is a suspicion, not proof of an N+1. Hash normalization handles common literals, not every SQL grammar. Use Bullet/Prosopite or an explicit query-bound test in development to verify fixes. No production object scans are installed.
 
-Full metrics/logs SDK integration is deferred; hosted aggregates use unsampled request events and the SDK does not capture application logs.
+Full metrics/logs SDK integration is deferred. Hosted request aggregates describe retained events; sampling can bias their distributions. The SDK does not capture application logs.
+
+## Automatic endpoint sampling
+
+Version 0.3.0 enables automatic endpoint sampling by default. A compatible hosted
+service supplies environment-wide endpoint rates based on its allowance policy.
+The SDK applies them before queueing, reducing serialization, network, and retained
+event volume. Each process uses the same policy and deterministic event-ID hash;
+there are no independent per-process allowance grants. A server-side tightening
+uses the same selection rule, so the two samplers do not multiply probabilities.
+
+Only completed `request` events with status 200–399, a finite duration from zero
+to below 1,000 ms, and fewer than three repeated queries are eligible. Slow,
+failed, unknown-duration, and repeated-query requests remain unsampled, as do
+business events, errors, jobs, mailer observations, visits, flags, checks, and
+OpenTelemetry spans. This preserves their sampling priority, not guaranteed
+delivery: queue bounds, payload limits, outages, and the server's hard daily quota
+still apply. Existing OpenTelemetry samplers remain authoritative; this feature
+does not promise complete distributed traces.
+
+To turn off SDK request selection explicitly:
+
+```ruby
+RailsMind.configure do |config|
+  config.automatic_sampling = false
+end
+```
+
+The SDK communicates this choice on policy and ingestion requests. The
+environment owner's hosted setting separately controls server-side sampling;
+local opt-out does **not** disable it or bypass the daily quota.
+
+The background worker requests `/api/v1/sampling_policy` with the ingest key and
+refreshes at most once per minute after its first request observation, including
+when the current rate is zero. It also receives controls on successful ingestion
+and quota responses. Missing, malformed, or expired policies fall back to rate 1;
+this may exhaust the server allowance during an outage. Expiry uses wall and
+monotonic clocks, with a maximum accepted lifetime of ten minutes. Before a valid
+v1 handshake, old servers and custom transports receive ordinary event-only
+batches and retain normal flush behavior. Forked workers reset queues, policies,
+counters, and report IDs and fetch their own copy of the shared policy.
+
+Retained request properties include SDK-owned `rails_mind_sampling` metadata:
+`version`, `policy_id`, effective `rate`, and `state` (`active`, `unavailable`,
+`expired`, `disabled`, or `protected`). This is the SDK selection decision, not
+proof of server acceptance or a complete traffic denominator.
+
+At most once per minute per process, the worker freezes an identified report of
+routine eligible observations; an explicit flush may send it sooner. Reports
+contain controller/action names and counts only: `observed`, `retained` (selected
+for enqueue), `sampled_out`, and `queue_dropped` (a subset of retained). They never
+contain event properties or user/account identifiers. Counts are observed after
+validation, redaction, and `before_send`; hooks that suppress events, crashes,
+protected requests, and unknown endpoint names are outside this denominator.
+Retained counts are not accepted counts. The resulting request percentiles and
+rates cannot be treated as an unbiased whole-traffic distribution.
+
+Reports have immutable UUIDs/bodies and separate durable acknowledgments. They
+can travel in `events: []` batches without consuming event quota, and an
+acknowledged report does not establish delivery of its accompanying events.
+Counters cover at most 100 endpoint names per window, reports share the normal
+batch byte limit, and each process retains at most five unacknowledged reports.
+Overflows or invalid clock windows mark coverage `limited`; reports older than
+seven days are discarded. This is bounded in-memory observation, not a durable
+request ledger. Unacknowledged reports after a confirmed handshake can cause
+`RailsMind.flush` to return false at its deadline.
 
 ## Jobs and mailer workflows
 
@@ -250,16 +315,18 @@ Add `<meta name="rails-mind-page" content="Invoices#index">` to supply a stable 
 
 ## Bounds, privacy, and outages
 
-Defaults are one lazy worker per process, 1,000 queued/in-flight events, 16 KiB per event, at most 100 events and 256 KiB per batch, and a two-second flush interval. Overflow drops the newest event. Retries retain the same encoded bytes/UUIDs; only HTTP 429, 5xx, and transient transport failures retry, at most three retries with bounded backoff. Other 4xx responses drop the batch. Redirects are not followed. Shutdown gets two seconds by default, then discards outstanding telemetry; forks start a fresh child queue rather than resending the parent's buffer.
+Defaults are one lazy worker per process, 1,000 queued/in-flight events, 16 KiB per event, at most 100 events and 256 KiB per batch, and a two-second flush interval. Overflow drops the newest event. Retries retain the same encoded bytes/UUIDs; only HTTP 429, 5xx, and transient transport failures retry, at most three retries with bounded backoff. Other 4xx responses end delivery attempts. A failed response can follow partial server acceptance, so such events are classified as delivery unconfirmed. Redirects are not followed. Shutdown gets two seconds by default, then discards outstanding telemetry; forks start a fresh child queue rather than resending the parent's buffer.
 
 ```ruby
 RailsMind.stats
-# => { enqueued:, delivered:, dropped:, retried:, queued:, in_flight:,
-#      losses: { "event.overflow" => 3, "error.delivery" => 1 } }
+# => { enqueued:, delivered:, dropped:, delivery_unconfirmed:, retried:, queued:, in_flight:,
+#      losses: { "event.overflow" => 3, "error.delivery_unconfirmed" => 1 },
+#      sampling: { observed:, retained:, sampled_out:, queue_dropped:,
+#                  unreported:, reports_lost:, pending_reports:, limited:, policy_state:, policy_id: } }
 RailsMind.flush(timeout: 2)
 ```
 
-These are per-process counters. The doctor prints them for its process; inspect running app stats through your existing operational tooling. The hosted app does not currently receive loss counters. Request/business/error signals are unsampled, but process crashes, rejected payloads, redaction hooks, exhausted retries, or queue pressure can still undercount. This is best-effort monitoring, not an accounting ledger. A future transactional outbox can provide durable business-event delivery; the current implementation does not claim that guarantee.
+These are per-process counters. `dropped` counts known local discards, such as queue overflow or oversize payloads. `delivery_unconfirmed` counts events whose delivery attempts ended without a success response, including interrupted in-flight batches; some may have been accepted by the server. `delivered` counts submitted events in batches with a successful HTTP response; it does not prove server retention or background processing. The doctor prints stats for its process; inspect running app stats through your existing operational tooling. Only the routine-request report above sends queue-loss observations to the hosted app. All signal kinds can still undercount after crashes, rejected payloads, hooks, or outages. This is best-effort monitoring, not an accounting ledger; use a transactional outbox when durable business-event delivery is required.
 
 Redaction occurs before buffering and again after custom `before_send`. Sensitive property names are filtered, nesting/string/collection sizes are capped, emails and common credential forms are scrubbed, exception messages are omitted by default, and backtraces drop machine-home prefixes. Bodies, cookies, credentials, SQL binds, and job arguments are never selected by integrations. Arbitrary user-provided text may contain sensitive content that generic redaction cannot recognize: use small, explicitly reviewed business properties. Opting into exception messages requires reviewing `capture_exception_message` and your custom scrubbing policy.
 

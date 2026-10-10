@@ -3,6 +3,7 @@ require_relative "rails_mind/configuration"
 require_relative "rails_mind/context"
 require_relative "rails_mind/redactor"
 require_relative "rails_mind/transport"
+require_relative "rails_mind/sampling"
 require_relative "rails_mind/collector"
 require_relative "rails_mind/client"
 

@@ -94,3 +94,19 @@ recipient inbox delivery, direct backend jobs, direct provider HTTP sends, and
 durable workflow completeness are outside this contract. Validate the released
 SDK against your app's queue, callback ordering, and delivery adapter. The hosted
 service exposes bounded workflow metadata and leaves recipient delivery unknown.
+
+## 0.3.0 endpoint sampling verification
+
+The Ruby suite passes locally with Ruby 4.0.7 and the locked Rails 8.1.4
+libraries: 105 tests and 1,311 assertions, with no failures or skips. The three
+Node browser-adapter contract tests also pass. These are isolated SDK/library
+tests; they do not boot a Rails application or use a database. CI separately
+runs the packaged-gem installation smoke check on Ruby 4.0.6.
+
+Coverage includes protected signals, deterministic shared selection, endpoint
+rates, local opt-out, malformed/expired controls, monotonic expiry, queue loss,
+immutable reports and acknowledgments, quota-response retries, old-server
+fallback, idle zero-rate report refresh, streamed response bounds, batch byte
+limits, and real process fork resets. Fake transports verify the wire contract;
+deployed server policy behavior, cross-process traffic forecasts, and a
+customer app's production overhead require hosted/staging validation.

@@ -20,6 +20,15 @@ class ConfigurationTest < Minitest::Test
     end
   end
 
+  def test_automatic_sampling_defaults_on_and_requires_a_boolean
+    config = RailsMind::Configuration.new(env: { "RAILS_MIND_KEY" => "test-only" })
+    assert_equal true, config.automatic_sampling
+    config.automatic_sampling = false
+    assert_same config, config.validate!
+    config.automatic_sampling = "false"
+    assert_raises(ArgumentError) { config.validate! }
+  end
+
   def test_endpoint_overrides_skip_blank_values_and_keep_transport_validation
     [ nil, "", " \n" ].each do |endpoint|
       config = RailsMind::Configuration.new(env: { "RAILS_MIND_ENDPOINT" => endpoint })
@@ -109,6 +118,7 @@ class ConfigurationTest < Minitest::Test
       assert report[:endpoint_present]
       assert report[:release_present]
       assert report[:enabled]
+      assert_equal true, report[:automatic_sampling]
       refute_includes report.to_json, "private-test-key"
       config.token = nil
       refute RailsMind::Diagnostic.new(root: root, config: config).report[:enabled]
