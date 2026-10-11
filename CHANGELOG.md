@@ -5,6 +5,7 @@
 - Send exception messages by default, scrubbed like every other string (emails, credentials, URL queries). `config.capture_exception_message = false` restores the placeholder.
 - Send the shape of each repeated query next to its fingerprint: the normalized SQL with literals replaced by `?`, comments removed, and at most 400 characters, only for fingerprints that repeated within the request. `config.capture_query_shapes = false` sends fingerprints only.
 - Strip SQL comments (query log tags, Marginalia) before fingerprinting, so a query tagged per request keeps one fingerprint.
+- Stop fingerprinting session settings and transaction control (`SET`, `SHOW`, `RESET`, `DISCARD`, `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`, `PRAGMA` and the like), so a per-query `SET LOCAL statement_timeout` no longer reads as an N+1. They still count toward `query_count`.
 
 ## 0.3.0 — 2026-10-10
 

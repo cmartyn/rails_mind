@@ -56,6 +56,26 @@ class RailsIntegrationsTest < SDKTest
     assert_empty RailsMind::Context.snapshot
   end
 
+  def test_session_settings_and_transaction_control_are_counted_but_never_fingerprinted_as_repeats
+    app = ->(_env) do
+      ActiveSupport::Notifications.instrument("process_action.action_controller", controller: "WorkflowsController", action: "show", status: 200, method: "GET") do
+        3.times { ActiveSupport::Notifications.instrument("sql.active_record", name: "SQL", sql: "SET LOCAL statement_timeout = '2s'", binds: []) }
+        2.times { ActiveSupport::Notifications.instrument("sql.active_record", name: nil, sql: "SHOW statement_timeout", binds: []) }
+        %w[BEGIN SAVEPOINT\ active_record_1 RELEASE\ SAVEPOINT\ active_record_1 COMMIT ROLLBACK RESET\ ALL DISCARD\ ALL PRAGMA\ foreign_keys].each do |sql|
+          2.times { ActiveSupport::Notifications.instrument("sql.active_record", name: "SQL", sql: "/* request_id:1 */ #{sql}", binds: []) }
+        end
+        ActiveSupport::Notifications.instrument("sql.active_record", name: "Workflow Load", sql: "SELECT * FROM workflows WHERE id = 1", binds: [])
+      end
+      [ 200, {}, [ "ok" ] ]
+    end
+    RailsMind::Integrations::RequestContext.new(app).call({})
+    properties = @memory.events.last["properties"]
+    assert_equal 22, properties["query_count"], "every statement still counts toward the request's statements"
+    assert_equal 0, properties["repeated_query_count"]
+    assert_equal 1, properties["query_fingerprints"].size
+    assert_empty properties["query_shapes"]
+  end
+
   def test_query_shapes_are_bounded_and_can_be_kept_at_home
     long_sql = "SELECT #{(1..120).map { |i| "orders.column_#{i}" }.join(', ')} FROM orders WHERE id = 1"
     app = ->(_env) do

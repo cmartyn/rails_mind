@@ -75,6 +75,9 @@ module RailsMind
 
     module RailsNotifications
       SHAPE_CHARS = 400
+      # Session settings and transaction control are bookkeeping, not reads: a
+      # per-query `SET LOCAL statement_timeout` must never look like an N+1.
+      BOOKKEEPING = /\A(?:SET|SHOW|RESET|DISCARD|BEGIN|START TRANSACTION|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE|PRAGMA)\b/i
 
       class << self
         def install!
@@ -106,6 +109,7 @@ module RailsMind
             # query has one fingerprint. Binds are never read. The shape is this same
             # normalized text, capped, and leaves only when capture_query_shapes allows.
             normalized = event.payload[:sql].to_s[0, 16_384].gsub(%r{/\*.*?\*/}m, " ").gsub(/'(?:[^']|'')*'/, "?").gsub(/\b\d+\b/, "?").gsub(/\s+/, " ").strip
+            next if normalized.match?(BOOKKEEPING)
             fingerprint = Digest::SHA256.hexdigest(normalized)[0, 24]
             next unless queries[:fingerprints].key?(fingerprint) || queries[:fingerprints].size < 100
             queries[:fingerprints][fingerprint] += 1
