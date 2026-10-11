@@ -81,6 +81,35 @@ class ClientTest < SDKTest
       "<internal:kernel>:187:in 'loop'"
     ], @memory.events.last.dig("properties", "backtrace")
     refute_includes JSON.generate(@memory.events), "private"
+
+    other = RuntimeError.new("boom")
+    other.set_backtrace([ "/srv/shop/app/models/gems/catalog/importer.rb:4:in 'run'",
+      "/usr/lib/ruby/vendor_ruby/3.3.0/json/common.rb:9:in 'parse'" ])
+    assert @client.capture_exception(other)
+    assert_equal [ "app/models/gems/catalog/importer.rb:4:in 'run'", "ruby/vendor_ruby/3.3.0/json/common.rb:9:in 'parse'" ],
+      @memory.events.last.dig("properties", "backtrace")
+  end
+
+  module ProbeDatabase
+    class StatementInvalid < StandardError; end
+  end
+
+  def test_database_errors_and_printed_hashes_lose_their_values
+    [
+      [ ProbeDatabase::StatementInvalid.new("PG::NotNullViolation: ERROR:  null value in column \"plan\" violates not-null constraint\nDETAIL:  Failing row contains (42, Jane Customer, $2a$12$Kq0bX, 9f86d081, null)."),
+        "PG::NotNullViolation: ERROR:  null value in column \"plan\" violates not-null constraint\nDETAIL:  Failing row contains (…)." ],
+      [ ProbeDatabase::StatementInvalid.new("PG::UniqueViolation: ERROR:  duplicate key value violates unique constraint \"index_users_on_api_token\"\nDETAIL:  Key (api_token)=(tok_live_9f8e7d6c5b4a) already exists."),
+        "PG::UniqueViolation: ERROR:  duplicate key value violates unique constraint \"index_users_on_api_token\"\nDETAIL:  Key (api_token)=(…) already exists." ],
+      [ ProbeDatabase::StatementInvalid.new("Mysql2::Error: Duplicate entry 'tok_live_9f8e' for key 'users.index_users_on_api_token'"),
+        "Mysql2::Error: Duplicate entry ? for key ?" ],
+      [ ProbeDatabase::StatementInvalid.new("PG::InvalidTextRepresentation: ERROR:  invalid input syntax for type uuid: \"5f3e-secret\"\nLINE 1: SELECT * FROM users WHERE token = 'abc123' AND id = '5f3e-secret'"),
+        "PG::InvalidTextRepresentation: ERROR:  invalid input syntax for type uuid: \"…\"\nLINE 1: SELECT * FROM users WHERE token = [FILTERED] AND id = ?" ],
+      [ ArgumentError.new("bad options {\"password\" => \"hunter2\", \"api_key\" => \"sk_live_51H\", \"plan\" => \"team\"} and {access_token: \"abc\"}"),
+        "bad options {\"password\" => \"[FILTERED]\", \"api_key\" => \"[FILTERED]\", \"plan\" => \"team\"} and {access_token: [FILTERED]" ]
+    ].each do |error, expected|
+      assert @client.capture_exception(error)
+      assert_equal expected, @memory.events.last.dig("properties", "message")
+    end
   end
 
   def test_hook_cannot_bypass_redaction_or_invent_protocol_keys

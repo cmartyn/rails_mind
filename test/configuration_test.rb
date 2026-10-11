@@ -30,8 +30,8 @@ class ConfigurationTest < Minitest::Test
     config.capture_query_shapes = "false"
     assert_raises(ArgumentError) { config.validate! }
     config.capture_query_shapes = true
-    config.capture_exception_message = nil
-    assert_raises(ArgumentError) { config.validate! }
+    config.capture_exception_message = "false" # 0.3.0 never validated this flag, so an upgrade must still boot.
+    assert_same config, config.validate!
   end
 
   def test_automatic_sampling_defaults_on_and_requires_a_boolean

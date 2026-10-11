@@ -102,9 +102,28 @@ module RailsMind
 
     module RailsNotifications
       SHAPE_CHARS = 400
+      # The server keeps a shape of at most 1000 bytes; redaction can lengthen one slightly.
+      SHAPE_BYTES = 900
       # Session settings and transaction control are bookkeeping, not reads: a
       # per-query `SET LOCAL statement_timeout` must never look like an N+1.
-      BOOKKEEPING = /\A(?:SET|SHOW|RESET|DISCARD|BEGIN|START TRANSACTION|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE|PRAGMA)\b/i
+      BOOKKEEPING = /\A(?:SET|SHOW|RESET|DISCARD|BEGIN|START TRANSACTION|COMMIT|END|ABORT|ROLLBACK|SAVEPOINT|RELEASE|PRAGMA)\b/i
+      # One pass over the statement, so a quote inside a comment or a comment
+      # marker inside a string cannot derail it: strings (doubled or backslash-
+      # escaped quotes, E'' and $$ forms, and one left open where the statement
+      # was cut), numbers and hex literals become ?, and comments go. Double
+      # quotes are identifiers, except on MySQL, where they can be strings.
+      LEXEME = /(?<!\w)[Ee]'(?:[^'\\]|\\.|'')*'?|'(?:[^'\\]|\\.|'')*'?|\$(\w*)\$.*?(?:\$\1\$|\z)|"(?:[^"\\]|\\.|"")*"?|`[^`]*`?|--[^\n]*|\/\*.*?(?:\*\/|\z)|\b0[xX]\h+\b|\b\d+(?:\.\d+)?(?:[eE][-+]?\d+)?\b/m
+
+      def self.normalize(sql, mysql: false)
+        sql.scrub("?").gsub(LEXEME) do |token|
+          case token[0]
+          when "-", "/" then " "
+          when "`" then token
+          when '"' then mysql ? "?" : token
+          else "?"
+          end
+        end.gsub(/\s+/, " ").strip
+      end
 
       class << self
         def install!
@@ -135,12 +154,13 @@ module RailsMind
             # Comments (query log tags, Marginalia) and literals go before hashing, so one
             # query has one fingerprint. Binds are never read. The shape is this same
             # normalized text, capped, and leaves only when capture_query_shapes allows.
-            normalized = event.payload[:sql].to_s[0, 16_384].gsub(%r{/\*.*?\*/}m, " ").gsub(/'(?:[^']|'')*'/, "?").gsub(/\b\d+\b/, "?").gsub(/\s+/, " ").strip
+            mysql = event.payload[:connection].respond_to?(:adapter_name) && event.payload[:connection].adapter_name.to_s.match?(/mysql|trilogy/i)
+            normalized = RailsNotifications.normalize(event.payload[:sql].to_s[0, 16_384], mysql: mysql)
             next if normalized.match?(BOOKKEEPING)
             fingerprint = Digest::SHA256.hexdigest(normalized)[0, 24]
             next unless queries[:fingerprints].key?(fingerprint) || queries[:fingerprints].size < 100
             queries[:fingerprints][fingerprint] += 1
-            (queries[:shapes] ||= {})[fingerprint] ||= normalized[0, SHAPE_CHARS] if RailsMind.client.config.capture_query_shapes
+            (queries[:shapes] ||= {})[fingerprint] ||= normalized[0, SHAPE_CHARS].byteslice(0, SHAPE_BYTES).scrub("") if RailsMind.client.config.capture_query_shapes
           end
           %w[enqueue.active_job enqueue_at.active_job perform_start.active_job perform.active_job enqueue_retry.active_job retry_stopped.active_job discard.active_job].each do |name|
             subscribe(name) do |event|
@@ -172,7 +192,10 @@ module RailsMind
                   kind = enqueue || operation == "perform_start" ? :span : :job
                   RailsMind.client.emit(kind, job.class.name, duration_ms: event.duration, status: status,
                     properties: job_properties(job, operation))
-                  RailsMind.capture_exception(error, source: "active_job") if error
+                  if error
+                    RailsMind.capture_exception(error, source: "active_job",
+                      location: { role: "job", job_class: job.class.name, queue: job.queue_name.to_s })
+                  end
                 end
               end
             end

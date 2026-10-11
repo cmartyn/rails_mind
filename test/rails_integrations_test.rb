@@ -76,6 +76,51 @@ class RailsIntegrationsTest < SDKTest
     assert_empty properties["query_shapes"]
   end
 
+  MysqlConnection = Struct.new(:adapter_name)
+
+  def test_query_shapes_keep_no_literal_whatever_the_quoting
+    statements = {
+      "SELECT * FROM users WHERE last_name = 'O\\'Brien' AND api_token = 'tok_live_9f8e7d' LIMIT 1" => "SELECT * FROM users WHERE last_name = ? AND api_token = [FILTERED] LIMIT ?",
+      "SELECT * FROM notes WHERE body = $$secret $body$$ AND tag = $t$x$t$ AND id = $1" => "SELECT * FROM notes WHERE body = ? AND tag = ? AND id = $?",
+      "SELECT * FROM notes WHERE body = E'it\\'s secret' AND hash = 0xDEADBEEF" => "SELECT * FROM notes WHERE body = ? AND hash = ?",
+      "SELECT * FROM notes -- Jane's note\nWHERE id = 7 /* it's 'Fix the */" => "SELECT * FROM notes WHERE id = ?",
+      "INSERT INTO notes (body) VALUES ('#{'passphrase is blue-otter-battery ' * 600}')" => "INSERT INTO notes (body) VALUES (?"
+    }
+    statements.each do |sql, shape|
+      app = ->(_env) do
+        ActiveSupport::Notifications.instrument("process_action.action_controller", controller: "NotesController", action: "show", status: 200, method: "GET") do
+          2.times { ActiveSupport::Notifications.instrument("sql.active_record", name: "Note Load", sql: sql, binds: []) }
+        end
+        [ 200, {}, [ "ok" ] ]
+      end
+      RailsMind::Integrations::RequestContext.new(app).call({})
+      assert_equal shape, @memory.events.last.dig("properties", "query_shapes").values.sole, sql.first(60)
+    end
+
+    app = ->(_env) do
+      ActiveSupport::Notifications.instrument("process_action.action_controller", controller: "NotesController", action: "show", status: 200, method: "GET") do
+        2.times { ActiveSupport::Notifications.instrument("sql.active_record", name: "Note Load", sql: "SELECT * FROM `notes` WHERE body = \"Jane Doe\"", binds: [], connection: MysqlConnection.new("Mysql2")) }
+      end
+      [ 200, {}, [ "ok" ] ]
+    end
+    RailsMind::Integrations::RequestContext.new(app).call({})
+    assert_equal "SELECT * FROM `notes` WHERE body = ?", @memory.events.last.dig("properties", "query_shapes").values.sole
+  end
+
+  def test_a_shape_never_exceeds_the_bytes_the_server_accepts
+    sql = "SELECT * FROM 表#{'名' * 500} WHERE id = 1"
+    app = ->(_env) do
+      ActiveSupport::Notifications.instrument("process_action.action_controller", controller: "NotesController", action: "show", status: 200, method: "GET") do
+        2.times { ActiveSupport::Notifications.instrument("sql.active_record", name: "Note Load", sql: sql, binds: []) }
+      end
+      [ 200, {}, [ "ok" ] ]
+    end
+    RailsMind::Integrations::RequestContext.new(app).call({})
+    shape = @memory.events.last.dig("properties", "query_shapes").values.sole
+    assert_operator shape.bytesize, :<=, RailsMind::Integrations::RailsNotifications::SHAPE_BYTES
+    assert shape.valid_encoding?
+  end
+
   def test_query_shapes_are_bounded_and_can_be_kept_at_home
     long_sql = "SELECT #{(1..120).map { |i| "orders.column_#{i}" }.join(', ')} FROM orders WHERE id = 1"
     app = ->(_env) do

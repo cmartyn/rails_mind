@@ -35,7 +35,9 @@ module RailsMind
 
     def validate!
       return self unless enabled?
-      %i[automatic_sampling capture_exception_message capture_query_shapes].each do |flag|
+      # capture_exception_message stays unvalidated as in 0.3.0, so an app that
+      # assigned it from ENV still boots after upgrading.
+      %i[automatic_sampling capture_query_shapes].each do |flag|
         value = public_send(flag)
         raise ArgumentError, "#{flag} must be true or false" unless value == true || value == false
       end
