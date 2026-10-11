@@ -77,6 +77,7 @@ ActionMailer::MailDeliveryJob.include(RailsMind::Integrations::JobContext)
 class ActionMailerTest < SDKTest
   def setup
     super
+    @config.capture_exception_message = false # Lifecycle events must carry no error content on their own.
     ActionMailer::Base.logger = nil
     ActiveJob::Base.logger = nil
     ActionMailer::MailDeliveryJob.queue_adapter = :test

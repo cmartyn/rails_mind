@@ -36,6 +36,7 @@ end
 class JobLifecycleTest < SDKTest
   def setup
     super
+    @config.capture_exception_message = false # Lifecycle events must carry no error content on their own.
     LifecycleJob.queue_adapter = :test
     LifecycleJob.queue_adapter.enqueued_jobs.clear
     RailsMind::Integrations::RailsNotifications.install!

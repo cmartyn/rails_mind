@@ -16,7 +16,7 @@ module RailsMind
         Context.with(request_id: env["action_dispatch.request_id"] || SecureRandom.uuid) do
           Context.with_trace do
             previous = Thread.current[:rails_mind_queries]
-            Thread.current[:rails_mind_queries] = { count: 0, fingerprints: Hash.new(0) }
+            Thread.current[:rails_mind_queries] = { count: 0, fingerprints: Hash.new(0), shapes: {} }
             @app.call(env)
           rescue StandardError => error
             # Capture identity before this request boundary unwinds. Object
@@ -74,6 +74,8 @@ module RailsMind
     end
 
     module RailsNotifications
+      SHAPE_CHARS = 400
+
       class << self
         def install!
           return if @subscriptions
@@ -83,20 +85,31 @@ module RailsMind
             queries = Thread.current[:rails_mind_queries]
             counts = queries&.fetch(:fingerprints, {}) || {}
             status = payload[:status] || (payload[:exception] ? 500 : 200)
+            top = counts.sort_by { |_, count| -count }.first(10).to_h
+            properties = { controller: payload[:controller], action: payload[:action],
+              method: payload[:method], view_runtime: payload[:view_runtime], db_runtime: payload[:db_runtime],
+              query_count: queries&.fetch(:count), repeated_query_count: counts.values.sum { |n| [ n - 1, 0 ].max },
+              query_fingerprints: top }
+            # Shapes go only for the queries that repeated: that is what a finding is about.
+            if RailsMind.client.config.capture_query_shapes
+              shapes = queries&.fetch(:shapes, {}) || {}
+              properties[:query_shapes] = top.filter_map { |fingerprint, count| [ fingerprint, shapes[fingerprint] ] if count >= 2 && shapes[fingerprint] }.to_h
+            end
             RailsMind.client.emit(:request, "#{payload[:controller]}##{payload[:action]}", duration_ms: event.duration,
-              status: status.to_s, properties: { controller: payload[:controller], action: payload[:action],
-                method: payload[:method], view_runtime: payload[:view_runtime], db_runtime: payload[:db_runtime],
-                query_count: queries&.fetch(:count), repeated_query_count: counts.values.sum { |n| [ n - 1, 0 ].max },
-                query_fingerprints: counts.sort_by { |_, count| -count }.first(10).to_h })
+              status: status.to_s, properties: properties)
           end
           subscribe("sql.active_record") do |event|
             queries = Thread.current[:rails_mind_queries]
             next unless queries && !event.payload[:cached] && !%w[SCHEMA TRANSACTION].include?(event.payload[:name])
             queries[:count] += 1
-            # Normalize locally, transmit only one-way hashes; never SQL or binds.
-            normalized = event.payload[:sql].to_s[0, 16_384].gsub(/'(?:[^']|'')*'/, "?").gsub(/\b\d+\b/, "?").gsub(/\s+/, " ")
+            # Comments (query log tags, Marginalia) and literals go before hashing, so one
+            # query has one fingerprint. Binds are never read. The shape is this same
+            # normalized text, capped, and leaves only when capture_query_shapes allows.
+            normalized = event.payload[:sql].to_s[0, 16_384].gsub(%r{/\*.*?\*/}m, " ").gsub(/'(?:[^']|'')*'/, "?").gsub(/\b\d+\b/, "?").gsub(/\s+/, " ").strip
             fingerprint = Digest::SHA256.hexdigest(normalized)[0, 24]
-            queries[:fingerprints][fingerprint] += 1 if queries[:fingerprints].key?(fingerprint) || queries[:fingerprints].size < 100
+            next unless queries[:fingerprints].key?(fingerprint) || queries[:fingerprints].size < 100
+            queries[:fingerprints][fingerprint] += 1
+            (queries[:shapes] ||= {})[fingerprint] ||= normalized[0, SHAPE_CHARS] if RailsMind.client.config.capture_query_shapes
           end
           %w[enqueue.active_job enqueue_at.active_job perform_start.active_job perform.active_job enqueue_retry.active_job retry_stopped.active_job discard.active_job].each do |name|
             subscribe(name) do |event|

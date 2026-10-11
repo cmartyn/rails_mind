@@ -9,7 +9,7 @@ module RailsMind
     attr_accessor :endpoint, :token, :release, :apm, :errors, :analytics, :flags,
       :queue_capacity, :batch_size, :max_batch_bytes, :max_event_bytes, :flush_interval,
       :max_retries, :retry_base, :open_timeout, :read_timeout, :shutdown_timeout,
-      :before_send, :capture_exception_message, :automatic_sampling
+      :before_send, :capture_exception_message, :capture_query_shapes, :automatic_sampling
 
     def initialize(env: ENV, root: nil)
       @endpoint = nonblank(env["RAILS_MIND_ENDPOINT"]) || DEFAULT_ENDPOINT
@@ -26,7 +26,8 @@ module RailsMind
       @open_timeout = 1.0
       @read_timeout = 2.0
       @shutdown_timeout = 2.0
-      @capture_exception_message = false
+      @capture_exception_message = true
+      @capture_query_shapes = true
       @automatic_sampling = true
     end
 
@@ -34,7 +35,10 @@ module RailsMind
 
     def validate!
       return self unless enabled?
-      raise ArgumentError, "automatic_sampling must be true or false" unless automatic_sampling == true || automatic_sampling == false
+      %i[automatic_sampling capture_exception_message capture_query_shapes].each do |flag|
+        value = public_send(flag)
+        raise ArgumentError, "#{flag} must be true or false" unless value == true || value == false
+      end
       uri = URI(endpoint)
       loopback = %w[localhost 127.0.0.1 ::1].include?(uri.hostname)
       raise ArgumentError, "endpoint must use HTTPS (HTTP only on loopback)" unless uri.is_a?(URI::HTTPS) || (uri.is_a?(URI::HTTP) && loopback)

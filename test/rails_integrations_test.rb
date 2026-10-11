@@ -23,12 +23,13 @@ class RailsIntegrationsTest < SDKTest
     super
   end
 
-  def test_request_has_unsampled_measurement_and_hashed_query_patterns
+  def test_request_has_unsampled_measurement_hashed_query_patterns_and_shapes_of_repeated_queries
     app = ->(_env) do
       ActiveSupport::Notifications.instrument("process_action.action_controller", controller: "OrdersController", action: "index", status: 200, method: "GET", params: { secret: "private" }) do
         3.times do |index|
-          ActiveSupport::Notifications.instrument("sql.active_record", name: "User Load", sql: "SELECT * FROM users WHERE id = #{index}", binds: [ "private" ])
+          ActiveSupport::Notifications.instrument("sql.active_record", name: "User Load", sql: "SELECT * FROM users /*request_id:abc-#{index},email:ann@example.com*/ WHERE id = #{index} AND name = 'ann #{index}'", binds: [ "private" ])
         end
+        ActiveSupport::Notifications.instrument("sql.active_record", name: "Order Load", sql: "SELECT * FROM orders WHERE token = 'single-secret'", binds: [])
       end
       [ 200, {}, [ "ok" ] ]
     end
@@ -39,12 +40,42 @@ class RailsIntegrationsTest < SDKTest
     assert_equal 1, requests.size
     event = requests.first
     assert_equal "request-42", event["request_id"]
-    assert_equal 3, event.dig("properties", "query_count")
+    assert_equal 4, event.dig("properties", "query_count")
     assert_equal 2, event.dig("properties", "repeated_query_count")
-    assert_match(/\A[0-9a-f]{24}\z/, event.dig("properties", "query_fingerprints").keys.first)
-    refute_includes JSON.generate(event), "SELECT"
-    refute_includes JSON.generate(event), "private"
+    fingerprints = event.dig("properties", "query_fingerprints")
+    assert_equal 2, fingerprints.size
+    repeated, _count = fingerprints.max_by { |_, count| count }
+    assert_match(/\A[0-9a-f]{24}\z/, repeated)
+    assert_equal({ repeated => "SELECT * FROM users WHERE id = ? AND name = ?" }, event.dig("properties", "query_shapes"), "only repeated fingerprints carry a shape")
+    json = JSON.generate(event)
+    refute_includes json, "private"
+    refute_includes json, "ann"
+    refute_includes json, "abc-", "query comments are stripped"
+    refute_includes json, "/*"
+    refute_includes json, "single-secret"
     assert_empty RailsMind::Context.snapshot
+  end
+
+  def test_query_shapes_are_bounded_and_can_be_kept_at_home
+    long_sql = "SELECT #{(1..120).map { |i| "orders.column_#{i}" }.join(', ')} FROM orders WHERE id = 1"
+    app = ->(_env) do
+      ActiveSupport::Notifications.instrument("process_action.action_controller", controller: "OrdersController", action: "show", status: 200, method: "GET") do
+        2.times { ActiveSupport::Notifications.instrument("sql.active_record", name: "Order Load", sql: long_sql, binds: []) }
+      end
+      [ 200, {}, [ "ok" ] ]
+    end
+    RailsMind::Integrations::RequestContext.new(app).call({})
+    shape = @memory.events.last.dig("properties", "query_shapes").values.sole
+    assert_equal 400, shape.length
+    assert shape.start_with?("SELECT orders.column_1, orders.column_2")
+    refute_includes shape, "id = 1"
+
+    @config.capture_query_shapes = false
+    RailsMind::Integrations::RequestContext.new(app).call({})
+    event = @memory.events.last
+    assert_equal 1, event.dig("properties", "repeated_query_count")
+    refute event["properties"].key?("query_shapes")
+    refute_includes JSON.generate(event), "SELECT"
   end
 
   def test_job_context_survives_serialization_and_does_not_leak_to_next_job
@@ -75,6 +106,7 @@ class RailsIntegrationsTest < SDKTest
     def existing.seen = @seen
     reporter.subscribe(existing)
     reporter.subscribe(RailsMind::Integrations::ErrorSubscriber.new)
+    @config.capture_exception_message = false
     error = RuntimeError.new("private")
     reporter.report(error, handled: false, context: { account_id: "a1", password: "private" })
     assert_same error, existing.seen
