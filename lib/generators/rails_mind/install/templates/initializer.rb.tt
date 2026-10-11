@@ -14,8 +14,12 @@ RailsMind.configure do |config|
   # config.analytics = false
   # config.flags = false
 
-  # Exception messages are omitted by default. Review before enabling.
-  # config.capture_exception_message = true
+  # Exception messages are scrubbed (emails, credentials) and sent. Set false to replace
+  # them with a placeholder and keep them in your app.
+  # config.capture_exception_message = false
+  # Repeated queries are sent as a fingerprint plus their shape (the normalized SQL with
+  # literals replaced and comments removed). Set false to send the fingerprints only.
+  # config.capture_query_shapes = false
   # config.before_send = ->(event) { event } # Return nil to drop an event.
 end
 

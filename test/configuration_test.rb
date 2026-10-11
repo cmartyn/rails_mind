@@ -20,6 +20,20 @@ class ConfigurationTest < Minitest::Test
     end
   end
 
+  def test_exception_messages_and_query_shapes_default_on_and_require_booleans
+    config = RailsMind::Configuration.new(env: { "RAILS_MIND_KEY" => "test-only" })
+    assert_equal true, config.capture_exception_message
+    assert_equal true, config.capture_query_shapes
+    config.capture_exception_message = false
+    config.capture_query_shapes = false
+    assert_same config, config.validate!
+    config.capture_query_shapes = "false"
+    assert_raises(ArgumentError) { config.validate! }
+    config.capture_query_shapes = true
+    config.capture_exception_message = "false" # 0.3.0 never validated this flag, so an upgrade must still boot.
+    assert_same config, config.validate!
+  end
+
   def test_automatic_sampling_defaults_on_and_requires_a_boolean
     config = RailsMind::Configuration.new(env: { "RAILS_MIND_KEY" => "test-only" })
     assert_equal true, config.automatic_sampling

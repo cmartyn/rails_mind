@@ -46,16 +46,70 @@ class ClientTest < SDKTest
     refute @client.emit(:event, "Paid")
   end
 
-  def test_exception_messages_omitted_and_same_object_deduplicated
-    error = RuntimeError.new("private balance 1000 password=swordfish")
+  def test_exception_messages_scrubbed_by_default_omitted_on_opt_out_and_same_object_deduplicated
+    error = RuntimeError.new("private balance 1000 password=swordfish for ann@example.com")
     error.set_backtrace([ "/Users/private/app/controllers/invoices_controller.rb:12:in 'show'" ])
     assert @client.capture_exception(error)
     refute @client.capture_exception(error)
     assert_equal 1, @memory.events.size
-    assert_equal "[Message omitted]", @memory.events.last.dig("properties", "message")
+    assert_equal "private balance 1000 password=[FILTERED] for [EMAIL]", @memory.events.last.dig("properties", "message")
     assert_equal "app/controllers/invoices_controller.rb:12:in 'show'", @memory.events.last.dig("properties", "backtrace", 0)
     refute_includes JSON.generate(@memory.events), "swordfish"
     assert @client.capture_exception(RuntimeError.new("second occurrence"))
+
+    @config.capture_exception_message = false
+    assert @client.capture_exception(RuntimeError.new("kept at home"))
+    assert_equal "[Message omitted]", @memory.events.last.dig("properties", "message")
+    refute_includes JSON.generate(@memory.events), "kept at home"
+  end
+
+  def test_gem_and_ruby_frames_keep_their_origin_so_they_never_pass_for_application_code
+    error = RuntimeError.new("boom")
+    error.set_backtrace([
+      "/Users/private/app/controllers/invoices_controller.rb:12:in 'show'",
+      "/Users/private/.rvm/gems/ruby-4.0.7/gems/activerecord-8.1.4/lib/active_record/relation.rb:10:in 'load'",
+      "/Users/private/.rvm/rubies/ruby-4.0.7/lib/ruby/4.0.0/monitor.rb:31:in 'synchronize'",
+      "/srv/app/vendor/bundle/ruby/4.0.0/bundler/gems/rails-abc123def/actionpack/lib/action_controller/metal.rb:5:in 'dispatch'",
+      "<internal:kernel>:187:in 'loop'"
+    ])
+    assert @client.capture_exception(error)
+    assert_equal [
+      "app/controllers/invoices_controller.rb:12:in 'show'",
+      "gems/activerecord-8.1.4/lib/active_record/relation.rb:10:in 'load'",
+      "ruby/4.0.0/monitor.rb:31:in 'synchronize'",
+      "gems/rails-abc123def/actionpack/lib/action_controller/metal.rb:5:in 'dispatch'",
+      "<internal:kernel>:187:in 'loop'"
+    ], @memory.events.last.dig("properties", "backtrace")
+    refute_includes JSON.generate(@memory.events), "private"
+
+    other = RuntimeError.new("boom")
+    other.set_backtrace([ "/srv/shop/app/models/gems/catalog/importer.rb:4:in 'run'",
+      "/usr/lib/ruby/vendor_ruby/3.3.0/json/common.rb:9:in 'parse'" ])
+    assert @client.capture_exception(other)
+    assert_equal [ "app/models/gems/catalog/importer.rb:4:in 'run'", "ruby/vendor_ruby/3.3.0/json/common.rb:9:in 'parse'" ],
+      @memory.events.last.dig("properties", "backtrace")
+  end
+
+  module ProbeDatabase
+    class StatementInvalid < StandardError; end
+  end
+
+  def test_database_errors_and_printed_hashes_lose_their_values
+    [
+      [ ProbeDatabase::StatementInvalid.new("PG::NotNullViolation: ERROR:  null value in column \"plan\" violates not-null constraint\nDETAIL:  Failing row contains (42, Jane Customer, $2a$12$Kq0bX, 9f86d081, null)."),
+        "PG::NotNullViolation: ERROR:  null value in column \"plan\" violates not-null constraint\nDETAIL:  Failing row contains (…)." ],
+      [ ProbeDatabase::StatementInvalid.new("PG::UniqueViolation: ERROR:  duplicate key value violates unique constraint \"index_users_on_api_token\"\nDETAIL:  Key (api_token)=(tok_live_9f8e7d6c5b4a) already exists."),
+        "PG::UniqueViolation: ERROR:  duplicate key value violates unique constraint \"index_users_on_api_token\"\nDETAIL:  Key (api_token)=(…) already exists." ],
+      [ ProbeDatabase::StatementInvalid.new("Mysql2::Error: Duplicate entry 'tok_live_9f8e' for key 'users.index_users_on_api_token'"),
+        "Mysql2::Error: Duplicate entry ? for key ?" ],
+      [ ProbeDatabase::StatementInvalid.new("PG::InvalidTextRepresentation: ERROR:  invalid input syntax for type uuid: \"5f3e-secret\"\nLINE 1: SELECT * FROM users WHERE token = 'abc123' AND id = '5f3e-secret'"),
+        "PG::InvalidTextRepresentation: ERROR:  invalid input syntax for type uuid: \"…\"\nLINE 1: SELECT * FROM users WHERE token = [FILTERED] AND id = ?" ],
+      [ ArgumentError.new("bad options {\"password\" => \"hunter2\", \"api_key\" => \"sk_live_51H\", \"plan\" => \"team\"} and {access_token: \"abc\"}"),
+        "bad options {\"password\" => \"[FILTERED]\", \"api_key\" => \"[FILTERED]\", \"plan\" => \"team\"} and {access_token: [FILTERED]" ]
+    ].each do |error, expected|
+      assert @client.capture_exception(error)
+      assert_equal expected, @memory.events.last.dig("properties", "message")
+    end
   end
 
   def test_hook_cannot_bypass_redaction_or_invent_protocol_keys

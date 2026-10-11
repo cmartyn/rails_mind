@@ -36,6 +36,7 @@ end
 class JobLifecycleTest < SDKTest
   def setup
     super
+    @config.capture_exception_message = false # Lifecycle events must carry no error content on their own.
     LifecycleJob.queue_adapter = :test
     LifecycleJob.queue_adapter.enqueued_jobs.clear
     RailsMind::Integrations::RailsNotifications.install!
@@ -168,6 +169,12 @@ class JobLifecycleTest < SDKTest
     assert_equal "error", operation("perform")["status"]
     assert_equal [ trace ], @memory.events.map { |event| event["trace_id"] }.uniq
     assert_empty RailsMind::Context.snapshot
+  end
+
+  def test_an_unhandled_job_error_says_which_job_raised_it
+    assert_raises(RuntimeError) { ActiveJob::Base.execute(FailingLifecycleJob.new.serialize) }
+    error = @memory.events.find { |event| event["kind"] == "error" }
+    assert_equal({ "role" => "job", "job_class" => "FailingLifecycleJob", "queue" => "default" }, error["properties"].slice("role", "job_class", "queue"))
   end
 
   def test_discard_and_perform_failure_stay_correlated_without_error_content

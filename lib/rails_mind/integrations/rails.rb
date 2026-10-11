@@ -1,11 +1,38 @@
 require "active_support/notifications"
+require "active_support/inflector"
 require "digest"
 
 module RailsMind
   module Integrations
+    # Where an exception happened, from the execution context Rails hands its
+    # error subscribers: the controller action, the job, or the kind of process.
+    # A runner script wins over a job it ran inline, whose context Rails leaves set.
+    def self.location(context, source)
+      controller, job = context[:controller], context[:job]
+      if source == "application.runner.railties"
+        { role: "runner" }
+      elsif controller.respond_to?(:action_name)
+        { role: "web", route: "#{controller.class.name}##{controller.action_name}" }
+      elsif job.respond_to?(:queue_name)
+        { role: "job", job_class: job.class.name, queue: job.queue_name.to_s }
+      elsif defined?(::Rails::Console)
+        { role: "console" }
+      else
+        {}
+      end
+    end
+
+    # The routed action of a request, named the way request events name it.
+    def self.request_location(env)
+      params = env["action_dispatch.request.path_parameters"]
+      return { role: "web" } unless params.is_a?(Hash) && params[:controller] && params[:action]
+      { role: "web", route: "#{ActiveSupport::Inflector.camelize(params[:controller].to_s)}Controller##{params[:action]}" }
+    end
+
     class ErrorSubscriber
       def report(error, handled:, severity:, context:, source: nil, **options)
-        RailsMind.capture_exception(error, handled: handled, severity: severity, context: context, source: source)
+        RailsMind.capture_exception(error, handled: handled, severity: severity, context: context, source: source,
+          location: Integrations.location(context, source))
       end
     end
 
@@ -16,12 +43,12 @@ module RailsMind
         Context.with(request_id: env["action_dispatch.request_id"] || SecureRandom.uuid) do
           Context.with_trace do
             previous = Thread.current[:rails_mind_queries]
-            Thread.current[:rails_mind_queries] = { count: 0, fingerprints: Hash.new(0) }
+            Thread.current[:rails_mind_queries] = { count: 0, fingerprints: Hash.new(0), shapes: {} }
             @app.call(env)
           rescue StandardError => error
             # Capture identity before this request boundary unwinds. Object
             # dedup still leaves other error reporters unaffected.
-            RailsMind.capture_exception(error, source: "rack")
+            RailsMind.capture_exception(error, source: "rack", location: Integrations.request_location(env))
             raise
           ensure
             Thread.current[:rails_mind_queries] = previous
@@ -74,6 +101,30 @@ module RailsMind
     end
 
     module RailsNotifications
+      SHAPE_CHARS = 400
+      # The server keeps a shape of at most 1000 bytes; redaction can lengthen one slightly.
+      SHAPE_BYTES = 900
+      # Session settings and transaction control are bookkeeping, not reads: a
+      # per-query `SET LOCAL statement_timeout` must never look like an N+1.
+      BOOKKEEPING = /\A(?:SET|SHOW|RESET|DISCARD|BEGIN|START TRANSACTION|COMMIT|END|ABORT|ROLLBACK|SAVEPOINT|RELEASE|PRAGMA)\b/i
+      # One pass over the statement, so a quote inside a comment or a comment
+      # marker inside a string cannot derail it: strings (doubled or backslash-
+      # escaped quotes, E'' and $$ forms, and one left open where the statement
+      # was cut), numbers and hex literals become ?, and comments go. Double
+      # quotes are identifiers, except on MySQL, where they can be strings.
+      LEXEME = /(?<!\w)[Ee]'(?:[^'\\]|\\.|'')*'?|'(?:[^'\\]|\\.|'')*'?|\$(\w*)\$.*?(?:\$\1\$|\z)|"(?:[^"\\]|\\.|"")*"?|`[^`]*`?|--[^\n]*|\/\*.*?(?:\*\/|\z)|\b0[xX]\h+\b|\b\d+(?:\.\d+)?(?:[eE][-+]?\d+)?\b/m
+
+      def self.normalize(sql, mysql: false)
+        sql.scrub("?").gsub(LEXEME) do |token|
+          case token[0]
+          when "-", "/" then " "
+          when "`" then token
+          when '"' then mysql ? "?" : token
+          else "?"
+          end
+        end.gsub(/\s+/, " ").strip
+      end
+
       class << self
         def install!
           return if @subscriptions
@@ -83,20 +134,33 @@ module RailsMind
             queries = Thread.current[:rails_mind_queries]
             counts = queries&.fetch(:fingerprints, {}) || {}
             status = payload[:status] || (payload[:exception] ? 500 : 200)
+            top = counts.sort_by { |_, count| -count }.first(10).to_h
+            properties = { controller: payload[:controller], action: payload[:action],
+              method: payload[:method], view_runtime: payload[:view_runtime], db_runtime: payload[:db_runtime],
+              query_count: queries&.fetch(:count), repeated_query_count: counts.values.sum { |n| [ n - 1, 0 ].max },
+              query_fingerprints: top }
+            # Shapes go only for the queries that repeated: that is what a finding is about.
+            if RailsMind.client.config.capture_query_shapes
+              shapes = queries&.fetch(:shapes, {}) || {}
+              properties[:query_shapes] = top.filter_map { |fingerprint, count| [ fingerprint, shapes[fingerprint] ] if count >= 2 && shapes[fingerprint] }.to_h
+            end
             RailsMind.client.emit(:request, "#{payload[:controller]}##{payload[:action]}", duration_ms: event.duration,
-              status: status.to_s, properties: { controller: payload[:controller], action: payload[:action],
-                method: payload[:method], view_runtime: payload[:view_runtime], db_runtime: payload[:db_runtime],
-                query_count: queries&.fetch(:count), repeated_query_count: counts.values.sum { |n| [ n - 1, 0 ].max },
-                query_fingerprints: counts.sort_by { |_, count| -count }.first(10).to_h })
+              status: status.to_s, properties: properties)
           end
           subscribe("sql.active_record") do |event|
             queries = Thread.current[:rails_mind_queries]
             next unless queries && !event.payload[:cached] && !%w[SCHEMA TRANSACTION].include?(event.payload[:name])
             queries[:count] += 1
-            # Normalize locally, transmit only one-way hashes; never SQL or binds.
-            normalized = event.payload[:sql].to_s[0, 16_384].gsub(/'(?:[^']|'')*'/, "?").gsub(/\b\d+\b/, "?").gsub(/\s+/, " ")
+            # Comments (query log tags, Marginalia) and literals go before hashing, so one
+            # query has one fingerprint. Binds are never read. The shape is this same
+            # normalized text, capped, and leaves only when capture_query_shapes allows.
+            mysql = event.payload[:connection].respond_to?(:adapter_name) && event.payload[:connection].adapter_name.to_s.match?(/mysql|trilogy/i)
+            normalized = RailsNotifications.normalize(event.payload[:sql].to_s[0, 16_384], mysql: mysql)
+            next if normalized.match?(BOOKKEEPING)
             fingerprint = Digest::SHA256.hexdigest(normalized)[0, 24]
-            queries[:fingerprints][fingerprint] += 1 if queries[:fingerprints].key?(fingerprint) || queries[:fingerprints].size < 100
+            next unless queries[:fingerprints].key?(fingerprint) || queries[:fingerprints].size < 100
+            queries[:fingerprints][fingerprint] += 1
+            (queries[:shapes] ||= {})[fingerprint] ||= normalized[0, SHAPE_CHARS].byteslice(0, SHAPE_BYTES).scrub("") if RailsMind.client.config.capture_query_shapes
           end
           %w[enqueue.active_job enqueue_at.active_job perform_start.active_job perform.active_job enqueue_retry.active_job retry_stopped.active_job discard.active_job].each do |name|
             subscribe(name) do |event|
@@ -128,7 +192,10 @@ module RailsMind
                   kind = enqueue || operation == "perform_start" ? :span : :job
                   RailsMind.client.emit(kind, job.class.name, duration_ms: event.duration, status: status,
                     properties: job_properties(job, operation))
-                  RailsMind.capture_exception(error, source: "active_job") if error
+                  if error
+                    RailsMind.capture_exception(error, source: "active_job",
+                      location: { role: "job", job_class: job.class.name, queue: job.queue_name.to_s })
+                  end
                 end
               end
             end
