@@ -63,6 +63,26 @@ class ClientTest < SDKTest
     refute_includes JSON.generate(@memory.events), "kept at home"
   end
 
+  def test_gem_and_ruby_frames_keep_their_origin_so_they_never_pass_for_application_code
+    error = RuntimeError.new("boom")
+    error.set_backtrace([
+      "/Users/private/app/controllers/invoices_controller.rb:12:in 'show'",
+      "/Users/private/.rvm/gems/ruby-4.0.7/gems/activerecord-8.1.4/lib/active_record/relation.rb:10:in 'load'",
+      "/Users/private/.rvm/rubies/ruby-4.0.7/lib/ruby/4.0.0/monitor.rb:31:in 'synchronize'",
+      "/srv/app/vendor/bundle/ruby/4.0.0/bundler/gems/rails-abc123def/actionpack/lib/action_controller/metal.rb:5:in 'dispatch'",
+      "<internal:kernel>:187:in 'loop'"
+    ])
+    assert @client.capture_exception(error)
+    assert_equal [
+      "app/controllers/invoices_controller.rb:12:in 'show'",
+      "gems/activerecord-8.1.4/lib/active_record/relation.rb:10:in 'load'",
+      "ruby/4.0.0/monitor.rb:31:in 'synchronize'",
+      "gems/rails-abc123def/actionpack/lib/action_controller/metal.rb:5:in 'dispatch'",
+      "<internal:kernel>:187:in 'loop'"
+    ], @memory.events.last.dig("properties", "backtrace")
+    refute_includes JSON.generate(@memory.events), "private"
+  end
+
   def test_hook_cannot_bypass_redaction_or_invent_protocol_keys
     @config.before_send = ->(event) { event.merge("raw_request" => "secret", "properties" => { token: "secret" }) }
     @client.emit(:event, "Paid")

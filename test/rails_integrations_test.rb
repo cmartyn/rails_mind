@@ -118,6 +118,32 @@ class RailsIntegrationsTest < SDKTest
     assert_nil @memory.events.reverse.find { |event| event["name"] == "Job completed" }["account_id"]
   end
 
+  class RailsMindExampleController
+    def action_name = "show"
+  end
+
+  def test_error_reports_say_which_action_job_or_process_raised_them
+    require "active_support/error_reporter"
+    ActiveSupport::ExecutionContext.clear
+    reporter = ActiveSupport::ErrorReporter.new
+    reporter.subscribe(RailsMind::Integrations::ErrorSubscriber.new)
+    reporter.report(RuntimeError.new("in a request"), handled: false, context: { controller: RailsMindExampleController.new }, source: "application.action_dispatch")
+    assert_equal({ "role" => "web", "route" => "RailsIntegrationsTest::RailsMindExampleController#show" },
+      @memory.events.last["properties"].slice("role", "route", "job_class", "queue"))
+
+    reporter.report(RuntimeError.new("in a job"), handled: false, context: { job: TelemetryExampleJob.new }, source: "application.active_job")
+    assert_equal({ "role" => "job", "job_class" => "TelemetryExampleJob", "queue" => "default" },
+      @memory.events.last["properties"].slice("role", "route", "job_class", "queue"))
+
+    reporter.report(NameError.new("in a script"), handled: false, context: { job: TelemetryExampleJob.new }, source: "application.runner.railties")
+    assert_equal({ "role" => "runner" }, @memory.events.last["properties"].slice("role", "route", "job_class", "queue"))
+
+    app = ->(_env) { raise KeyError, "unrouted" }
+    env = { "action_dispatch.request.path_parameters" => { controller: "admin/orders", action: "show" } }
+    assert_raises(KeyError) { RailsMind::Integrations::RequestContext.new(app).call(env) }
+    assert_equal({ "role" => "web", "route" => "Admin::OrdersController#show" }, @memory.events.last["properties"].slice("role", "route"))
+  end
+
   def test_rails_error_reporter_uses_collector_without_replacing_other_subscribers
     require "active_support/error_reporter"
     reporter = ActiveSupport::ErrorReporter.new

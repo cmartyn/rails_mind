@@ -5,6 +5,8 @@
 - Send exception messages by default, scrubbed like every other string (emails, credentials, URL queries). `config.capture_exception_message = false` restores the placeholder.
 - Send the shape of each repeated query next to its fingerprint: the normalized SQL with literals replaced by `?`, comments removed, and at most 400 characters, only for fingerprints that repeated within the request. `config.capture_query_shapes = false` sends fingerprints only.
 - Strip SQL comments (query log tags, Marginalia) before fingerprinting, so a query tagged per request keeps one fingerprint.
+- Name where each exception happened: `role` (`web`, `job`, `runner` or `console`), with the controller action as `route` for requests and `job_class` and `queue` for jobs, read from the execution context Rails passes to error subscribers.
+- Keep the origin of library frames in backtraces (`gems/activerecord-8.1.4/lib/…`, `ruby/4.0.0/…`) so they can no longer pass for the application's own `lib/` files.
 - Stop fingerprinting session settings and transaction control (`SET`, `SHOW`, `RESET`, `DISCARD`, `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`, `PRAGMA` and the like), so a per-query `SET LOCAL statement_timeout` no longer reads as an N+1. They still count toward `query_count`.
 
 ## 0.3.0 — 2026-10-10

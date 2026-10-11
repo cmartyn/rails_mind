@@ -40,7 +40,9 @@ module RailsMind
       false
     end
 
-    def capture_exception(error, handled: false, severity: :error, context: {}, source: nil, **_options)
+    LOCATION_KEYS = %i[role route job_class queue].freeze
+
+    def capture_exception(error, handled: false, severity: :error, context: {}, source: nil, location: nil, **_options)
       return false unless config.errors
       # Rails reports an exception through more than one boundary. A weak key map
       # avoids retaining exceptions; identity dedup applies only to this object.
@@ -51,10 +53,11 @@ module RailsMind
       message = config.capture_exception_message ? @redactor.scrub(error.message.to_s) : "[Message omitted]"
       frames = Array(error.backtrace).first(40).map { |frame| safe_frame(frame) }
       Context.with(context.slice(*Context::KEYS)) do
+        where = (location || {}).slice(*LOCATION_KEYS).select { |_, value| value.is_a?(String) && !value.empty? }.transform_values { |value| value[0, 200] }
         emit(:error, error.class.name, status: "error", properties: {
           exception_class: error.class.name, message: message, backtrace: frames,
           handled: handled, severity: severity.to_s, source: source
-        })
+        }.merge(where))
       end
     rescue StandardError
       false
@@ -104,12 +107,23 @@ module RailsMind
       time.iso8601(6)
     end
 
+    # An installed gem or Ruby's own library keeps its origin ("gems/rack-3.1.8/lib/…",
+    # "ruby/4.0.0/…") so it can never pass for the application's lib/.
+    GEM_FRAME = %r{\A.*/gems/([^/]+)/}
+    RUBY_FRAME = %r{\A.*?/lib/ruby/(\d[^/]*)/}
+
     def safe_frame(frame)
       frame = frame.to_s
       frame = frame.delete_prefix("#{Rails.root}/") if defined?(Rails) && Rails.respond_to?(:root) && Rails.root
-      # Remove machine/user home paths, retaining source filename + line + method.
-      frame = frame.sub(%r{\A.*?/(app|lib|config|test|spec)/}, '\\1/')
-      frame = frame.sub(%r{\A/(?:[^/:]+/)*([^/:]+:\d+)}, '\\1')
+      if frame.match?(GEM_FRAME)
+        frame = frame.sub(GEM_FRAME, 'gems/\\1/')
+      elsif frame.match?(RUBY_FRAME)
+        frame = frame.sub(RUBY_FRAME, 'ruby/\\1/')
+      else
+        # Remove machine/user home paths, retaining source filename + line + method.
+        frame = frame.sub(%r{\A.*?/(app|lib|config|test|spec)/}, '\\1/')
+        frame = frame.sub(%r{\A/(?:[^/:]+/)*([^/:]+:\d+)}, '\\1')
+      end
       @redactor.scrub(frame)
     end
 

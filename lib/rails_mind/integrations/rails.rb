@@ -1,11 +1,38 @@
 require "active_support/notifications"
+require "active_support/inflector"
 require "digest"
 
 module RailsMind
   module Integrations
+    # Where an exception happened, from the execution context Rails hands its
+    # error subscribers: the controller action, the job, or the kind of process.
+    # A runner script wins over a job it ran inline, whose context Rails leaves set.
+    def self.location(context, source)
+      controller, job = context[:controller], context[:job]
+      if source == "application.runner.railties"
+        { role: "runner" }
+      elsif controller.respond_to?(:action_name)
+        { role: "web", route: "#{controller.class.name}##{controller.action_name}" }
+      elsif job.respond_to?(:queue_name)
+        { role: "job", job_class: job.class.name, queue: job.queue_name.to_s }
+      elsif defined?(::Rails::Console)
+        { role: "console" }
+      else
+        {}
+      end
+    end
+
+    # The routed action of a request, named the way request events name it.
+    def self.request_location(env)
+      params = env["action_dispatch.request.path_parameters"]
+      return { role: "web" } unless params.is_a?(Hash) && params[:controller] && params[:action]
+      { role: "web", route: "#{ActiveSupport::Inflector.camelize(params[:controller].to_s)}Controller##{params[:action]}" }
+    end
+
     class ErrorSubscriber
       def report(error, handled:, severity:, context:, source: nil, **options)
-        RailsMind.capture_exception(error, handled: handled, severity: severity, context: context, source: source)
+        RailsMind.capture_exception(error, handled: handled, severity: severity, context: context, source: source,
+          location: Integrations.location(context, source))
       end
     end
 
@@ -21,7 +48,7 @@ module RailsMind
           rescue StandardError => error
             # Capture identity before this request boundary unwinds. Object
             # dedup still leaves other error reporters unaffected.
-            RailsMind.capture_exception(error, source: "rack")
+            RailsMind.capture_exception(error, source: "rack", location: Integrations.request_location(env))
             raise
           ensure
             Thread.current[:rails_mind_queries] = previous
