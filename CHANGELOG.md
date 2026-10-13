@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.2 — unreleased
+
+Security fix for the scrubbing 0.3.1 turned on by default. Upgrade from 0.3.1.
+
+- An `Authorization` header in a message or string (`Bearer`, `Basic`, `Token` and other schemes; any case; `:`, `=` or `=>`; quoted, unquoted or wrapped in an array as `Net::HTTP#to_hash` prints it; `Proxy-Authorization` too) loses its credential. A `Digest` or `AWS4-HMAC-SHA256` header loses its whole value. 0.3.1 replaced only the scheme word and sent the credential after it.
+- Userinfo goes from a URL of any scheme (`redis://:password@`, `rediss://`, `amqp://`, `postgres://`, `mysql2://`, `mongodb+srv://` and others), not only `http(s)://`, up to the last `@` before the path, so an unencoded `@` in a password leaves nothing behind.
+- Provider credentials go without a key word next to them: GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), AWS access key IDs (`AKIA`, `ASIA`), Stripe secret and restricted keys (`sk_live_`, `sk_test_`, `rk_…`), Slack tokens (`xox…-`), `sk-` API keys and JWTs.
+- Card numbers (13 to 19 digits, grouped by spaces or dashes or not, passing the Luhn check, also next to an expiry or another number) and US social security numbers (`123-45-6789`) go from free text: messages, backtraces, event names and properties. Identity, correlation and release values (`user_id`, `account_id`, `visitor_id`, `request_id`, `release` and the like) are left alone, so a numeric account ID is never mistaken for a card. In printed hashes, `phone` and `ssn` values go too.
+- Scrubbing reads at most 8 KB of a string, cut at whitespace, and every pass is linear, so a hostile message cannot stall the request that raised it. What is sent is still at most 1024 characters.
+- A PostgreSQL literal ending in a backslash no longer lets the next literal through, in query shapes or database error messages. Rails runs PostgreSQL with `standard_conforming_strings`, where `\` escapes a quote only inside `E'…'`, while MySQL lets it escape one; a statement or message containing a backslash is now read both ways and anything either reading takes for a literal goes. Statements without a backslash keep their fingerprints; one with an ambiguous `\'` keeps its text only up to that literal, so its fingerprint changes.
+- Tests: an adversarial corpus of these inputs that no secret may survive, as a message, an event property or a query shape.
+- `rails_mind:doctor` now exits 1 and names `RAILS_MIND_KEY` or the endpoint when collection would be off.
+
 ## 0.3.1 — unreleased
 
 - Send exception messages by default, scrubbed like every other string (emails, credentials, URL queries), and further for what generic scrubbing misses: database errors lose the failing row, key values, rejected input and quoted SQL literals, and printed hashes or keyword arguments lose the values of sensitive keys. `config.capture_exception_message = false` restores the placeholder. The flag is still not validated, so an app that assigned it from ENV boots as before.

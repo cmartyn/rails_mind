@@ -80,7 +80,9 @@ class RailsIntegrationsTest < SDKTest
 
   def test_query_shapes_keep_no_literal_whatever_the_quoting
     statements = {
-      "SELECT * FROM users WHERE last_name = 'O\\'Brien' AND api_token = 'tok_live_9f8e7d' LIMIT 1" => "SELECT * FROM users WHERE last_name = ? AND api_token = [FILTERED] LIMIT ?",
+      # On PostgreSQL 'O\' ends the literal; read both ways, everything after it goes.
+      "SELECT * FROM users WHERE last_name = 'O\\'Brien' AND api_token = 'tok_live_9f8e7d' LIMIT 1" => "SELECT * FROM users WHERE last_name = ?",
+      "SELECT * FROM users WHERE last_name = 'O''Brien' AND api_token = 'tok_live_9f8e7d' LIMIT 1" => "SELECT * FROM users WHERE last_name = ? AND api_token = [FILTERED] LIMIT ?",
       "SELECT * FROM notes WHERE body = $$secret $body$$ AND tag = $t$x$t$ AND id = $1" => "SELECT * FROM notes WHERE body = ? AND tag = ? AND id = $?",
       "SELECT * FROM notes WHERE body = E'it\\'s secret' AND hash = 0xDEADBEEF" => "SELECT * FROM notes WHERE body = ? AND hash = ?",
       "SELECT * FROM notes -- Jane's note\nWHERE id = 7 /* it's 'Fix the */" => "SELECT * FROM notes WHERE id = ?",

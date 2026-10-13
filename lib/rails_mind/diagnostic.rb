@@ -36,5 +36,17 @@ module RailsMind
           "No network check is performed and credential values are never printed." ]
       }
     end
+
+    # What keeps collection off, one sentence each, naming the setting to change.
+    def problems
+      [].tap do |found|
+        if @config.token.to_s.strip.empty?
+          found << "RAILS_MIND_KEY is not set, so collection is off. Set it in this app's environment to the ingest key from RailsMind Setup, restart, then run bin/rails rails_mind:verify."
+        end
+        if @config.endpoint.to_s.strip.empty?
+          found << "The RailsMind endpoint is blank, so collection is off. Leave config.endpoint and RAILS_MIND_ENDPOINT unset to use #{Configuration::DEFAULT_ENDPOINT}, or set your RailsMind instance's URL."
+        end
+      end
+    end
   end
 end

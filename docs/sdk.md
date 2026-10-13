@@ -16,6 +16,13 @@ gem "rails_mind", "~> 0.3.0"
 bundle install
 bin/rails generate rails_mind:install --plan
 bin/rails generate rails_mind:install
+```
+
+Then set `RAILS_MIND_KEY` ([configuration](#configuration-and-release-detection)) and, with
+it in the app's environment, check the effective settings. Until the key is set,
+doctor names it and exits non-zero.
+
+```sh
 bin/rails rails_mind:doctor
 ```
 
@@ -66,7 +73,9 @@ When upgrading an existing generated initializer, remove the old endpoint/releas
 assignments that directly read `ENV` so they do not overwrite the new defaults
 with `nil` or bypass platform detection. The installer preserves existing files.
 The doctor reports whether the effective endpoint, key, and release are present,
-without printing credential values or contacting the server.
+without printing credential values or contacting the server. While the key is
+missing or the endpoint is blank, it names the setting after the report and
+exits non-zero, as `rails_mind:verify` does.
 
 ## Verify the connection
 

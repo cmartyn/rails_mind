@@ -7,9 +7,15 @@ namespace :rails_mind do
     exit 1 unless result[:success]
   end
 
-  desc "Inspect dependencies and report the non-destructive integration plan"
+  desc "Inspect dependencies and report the non-destructive integration plan; fails while collection is off"
   task doctor: :environment do
     require "rails_mind/diagnostic"
-    puts JSON.pretty_generate(RailsMind::Diagnostic.new(root: Rails.root).report.merge(collector: RailsMind.stats))
+    diagnostic = RailsMind::Diagnostic.new(root: Rails.root)
+    puts JSON.pretty_generate(diagnostic.report.merge(collector: RailsMind.stats))
+    problems = diagnostic.problems
+    unless problems.empty?
+      warn problems
+      exit 1
+    end
   end
 end
