@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.2 — unreleased
+## 0.3.2 — 2026-10-13
 
 Security fix for the scrubbing 0.3.1 turned on by default. Upgrade from 0.3.1.
 
@@ -13,7 +13,7 @@ Security fix for the scrubbing 0.3.1 turned on by default. Upgrade from 0.3.1.
 - Tests: an adversarial corpus of these inputs that no secret may survive, as a message, an event property or a query shape.
 - `rails_mind:doctor` now exits 1 and names `RAILS_MIND_KEY` or the endpoint when collection would be off.
 
-## 0.3.1 — unreleased
+## 0.3.1 — 2026-10-11
 
 - Send exception messages by default, scrubbed like every other string (emails, credentials, URL queries), and further for what generic scrubbing misses: database errors lose the failing row, key values, rejected input and quoted SQL literals, and printed hashes or keyword arguments lose the values of sensitive keys. `config.capture_exception_message = false` restores the placeholder. The flag is still not validated, so an app that assigned it from ENV boots as before.
 - Send the shape of each repeated query next to its fingerprint: the normalized SQL with literals replaced by `?`, comments removed, and at most 400 characters and 900 bytes, only for fingerprints that repeated within the request. One pass handles doubled and backslash-escaped quotes, `E''` and `$$` strings, hex numbers, comments containing quotes, a literal left open where a long statement is cut, and MySQL's double-quoted strings. `config.capture_query_shapes = false` sends fingerprints only.
