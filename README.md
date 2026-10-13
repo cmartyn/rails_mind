@@ -19,7 +19,6 @@ and [release notes](CHANGELOG.md).
 bundle install
 bin/rails generate rails_mind:install --plan
 bin/rails generate rails_mind:install
-bin/rails rails_mind:doctor
 ```
 
 Set **`RAILS_MIND_KEY`** for the destination application environment. It is the only
@@ -29,7 +28,14 @@ app's deployed `REVISION` file; telemetry still works when none is available.
 `RAILS_MIND_ENDPOINT` and `RAILS_MIND_RELEASE` are optional overrides. See
 [configuration and release detection](docs/sdk.md#configuration-and-release-detection).
 
-After setting the key, run `bin/rails rails_mind:verify` on the app's
+With the key in the app's environment, check the effective settings. Until the
+key is set, doctor names it and exits non-zero.
+
+```sh
+bin/rails rails_mind:doctor
+```
+
+Next, run `bin/rails rails_mind:verify` on the app's
 server. Match its check ID in RailsMind **Setup** and wait for **Check processed**.
 Then visit the app to confirm real traffic. This command sends one labeled
 diagnostic check, consumes one event of quota, and leaves business/performance

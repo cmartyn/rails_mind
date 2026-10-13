@@ -113,17 +113,71 @@ module RailsMind
       # was cut), numbers and hex literals become ?, and comments go. Double
       # quotes are identifiers, except on MySQL, where they can be strings.
       LEXEME = /(?<!\w)[Ee]'(?:[^'\\]|\\.|'')*'?|'(?:[^'\\]|\\.|'')*'?|\$(\w*)\$.*?(?:\$\1\$|\z)|"(?:[^"\\]|\\.|"")*"?|`[^`]*`?|--[^\n]*|\/\*.*?(?:\*\/|\z)|\b0[xX]\h+\b|\b\d+(?:\.\d+)?(?:[eE][-+]?\d+)?\b/m
+      # The same lexemes where a backslash escapes nothing outside E'...', as on
+      # PostgreSQL (Rails turns standard_conforming_strings on) and SQLite. Which
+      # rule applies is not always known (MySQL can turn backslash escapes off),
+      # so a statement with a backslash is read both ways and anything either
+      # reading takes for a literal goes. Without a backslash both agree.
+      STANDARD_LEXEME = /(?<!\w)[Ee]'(?:[^'\\]|\\.|'')*'?|'(?:[^']|'')*'?|\$(\w*)\$.*?(?:\$\1\$|\z)|"(?:[^"]|"")*"?|`[^`]*`?|--[^\n]*|\/\*.*?(?:\*\/|\z)|\b0[xX]\h+\b|\b\d+(?:\.\d+)?(?:[eE][-+]?\d+)?\b/m
 
       def self.normalize(sql, mysql: false)
-        sql.scrub("?").gsub(LEXEME) do |token|
-          case token[0]
-          when "-", "/" then " "
-          when "`" then token
-          when '"' then mysql ? "?" : token
-          else "?"
-          end
-        end.gsub(/\s+/, " ").strip
+        sql = sql.scrub("?")
+        text = sql.include?("\\") ? read_both_ways(sql, mysql) : sql.gsub(LEXEME) { |token| replacement(token, mysql) }
+        text.gsub(/\s+/, " ").strip
       end
+
+      def self.replacement(token, mysql)
+        case token[0]
+        when "-", "/" then " "
+        when "`" then token
+        when '"' then mysql ? "?" : token
+        else "?"
+        end
+      end
+
+      # Literal spans from either reading merge into one ?; a comment that
+      # overlaps one joins it. Kept identifiers stay only where no reading saw a
+      # literal.
+      def self.read_both_ways(sql, mysql)
+        literals, comments = [], []
+        [ STANDARD_LEXEME, LEXEME ].each do |pattern|
+          sql.scan(pattern) do
+            token = Regexp.last_match
+            case replacement(token[0], mysql)
+            when "?" then literals << token.offset(0)
+            when " " then comments << token.offset(0)
+            end
+          end
+        end
+        literals = merge(literals)
+        loop do
+          # Merged literal spans are sorted and disjoint, so their ends are too.
+          joining, comments = comments.partition do |start, finish|
+            overlap = literals.bsearch { |_, last| last > start }
+            overlap && overlap[0] < finish
+          end
+          break if joining.empty?
+          literals = merge(literals + joining)
+        end
+        spans = (literals.map { |span| span + [ "?" ] } + merge(comments).map { |span| span + [ " " ] }).sort
+        output, position = +"", 0
+        spans.each do |start, finish, mark|
+          output << sql[position...start] << mark
+          position = finish
+        end
+        output << sql[position..]
+      end
+
+      def self.merge(spans)
+        spans.sort.each_with_object([]) do |(start, finish), merged|
+          if merged.any? && start < merged.last[1]
+            merged.last[1] = [ merged.last[1], finish ].max
+          else
+            merged << [ start, finish ]
+          end
+        end
+      end
+      private_class_method :replacement, :read_both_ways, :merge
 
       class << self
         def install!
