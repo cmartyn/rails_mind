@@ -18,6 +18,8 @@ module RailsMind
     def send_batch(json)
       request = Net::HTTP::Post.new(@uri)
       request.body = json
+      zone = time_zone
+      request["X-RailsMind-Time-Zone"] = zone if zone
       perform(request)
     end
 
@@ -28,6 +30,18 @@ module RailsMind
     end
 
     private
+
+    # The app's IANA zone (Rails' default "UTC" is Etc/UTC), so RailsMind counts
+    # days where the app's people live. Unknown until Rails has set it.
+    def time_zone
+      @time_zone ||= begin
+        zone = Time.zone_default if Time.respond_to?(:zone_default)
+        name = zone&.tzinfo&.name
+        name if name.is_a?(String) && !name.empty?
+      rescue StandardError
+        nil
+      end
+    end
 
     def perform(request)
       Context.suppress do

@@ -24,7 +24,9 @@ Dir.chdir(File.expand_path("..", __dir__)) do
       require_relative "test/action_mailer_test"
       require_relative "test/rails_integrations_test"
       require_relative "test/visitor_test"
-      %w[context visitor integrations/rails integrations/action_mailer].each do |feature|
+      require_relative "test/page_view_test"
+      require_relative "test/transport_test"
+      %w[context visitor page_view transport integrations/rails integrations/action_mailer].each do |feature|
         suffix = "/lib/rails_mind/#{feature}.rb"
         actual = $LOADED_FEATURES.find { |path| path.end_with?(suffix) }
         expected = File.join(ARGV.fetch(0), "lib/rails_mind/#{feature}.rb")

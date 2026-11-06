@@ -169,6 +169,85 @@ end
 
 This store requires no growing analytics tables. It does not offer database-backed `Ahoy::Visit` objects, `visitable` associations, geocoding storage, historical import, or cookie-free persisted visit lookup. Applications using those behaviors should keep their current store and mirror. Disable an existing duplicate pageview handler only as a deliberate customer configuration change.
 
+## Page views
+
+With `analytics` and `page_views` on (the default), the SDK counts a page view
+for each HTML page a controller renders for a person: a GET answered with a 2xx
+`text/html` response. These are not counted:
+
+- Turbo Frame requests, prefetches (`Sec-Purpose` or `X-Sec-Purpose: prefetch`)
+  and XHRs;
+- `Rails::` controllers (the `/up` health check included) and `ActiveStorage::`
+  controllers;
+- a blank or known-bot user agent (crawlers, link previews, LLM fetchers, uptime
+  monitors and bare HTTP clients);
+- anything your `ignore_page_view` hook returns true for. It receives the
+  request; a hook that raises skips that page view.
+
+```ruby
+config.ignore_page_view = ->(request) { request.path.start_with?("/admin") }
+```
+
+A page view is a `pageview` event named `Controller#action`, with the trace and
+request IDs of the request event for the same action. Its properties:
+
+| Property | What it holds |
+| --- | --- |
+| `route` | The route pattern, such as `/posts/:id`, without `(.:format)` |
+| `path` | The path and query string, with the app's `filter_parameters` applied (at most 1,000 characters) |
+| `host` | The request's host |
+| `referrer` | The referring URL's scheme, host and path; its query and fragment are not sent |
+| `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `ref` | Those query parameters, at most 200 characters each |
+| `user_agent` | The user agent, at most 500 characters; RailsMind derives device, browser and OS from it |
+| `country` | Two letters from `CF-IPCountry` or `CloudFront-Viewer-Country`, when present |
+| `visitor_id_kind` | `cookie` or `daily_hash` (below) |
+
+The page view also carries the visitor ID and, once `identify` has run, the
+user and account IDs. Set `config.link_page_views_to_users = false` to keep user
+and account IDs off page views; other events still carry them. The IP address is
+never sent. Every string goes through the same redaction as other events. Page
+views are never sampled and count against the environment's daily quota.
+
+### Visitor cookie
+
+By default the SDK keeps a random visitor ID in a first-party cookie named
+`_rails_mind_visitor`: a UUID, `path=/`, two years, `HttpOnly`, `SameSite=Lax`,
+and `Secure` over HTTPS. Each counted page view sets or refreshes it, and a new
+visitor's first page view already carries the ID that response sets. Every event
+of the request, `RailsMind.track` calls and jobs enqueued there included, carries
+the same ID, so an anonymous visit can lead to an outcome. A cookie value that is
+not a UUID the SDK could have made is replaced.
+
+A response marked `Cache-Control: public` never gets the cookie, so shared caches
+keep working. Its page view uses the visitor's cookie when they brought one, and
+otherwise the daily hash.
+
+With `config.visitor_cookie = false`, no cookie is read or set. Page views, and
+the other events of the same request, carry a daily hash instead: an HMAC of the
+local date, the remote IP and the user agent, keyed from the app's
+`secret_key_base` (never the ingest key) and cut to 32 hex characters. It changes
+every day in the app's time zone, so a person who comes back the next day counts
+as a new visitor. Without `secret_key_base` or a remote IP, page views carry no
+visitor ID. Behind a proxy, set `config.action_dispatch.trusted_proxies` so
+`request.remote_ip` is the visitor's address.
+
+### Time zone
+
+Every batch names the app's time zone (`config.time_zone` as an IANA name, so
+Rails' default `UTC` is `Etc/UTC`) in the `X-RailsMind-Time-Zone` header, and
+RailsMind counts days in that zone.
+
+### Limits
+
+- Turbo broadcast page refreshes (`broadcasts_refreshes`) reload a page the way
+  a visit does, so each refresh counts as a page view in every open tab.
+- Pages served from a CDN or a browser cache never reach the app and are not
+  counted. A `304 Not Modified` from `Rack::ConditionalGet` still counts.
+- Bot filtering is a built-in user-agent list. Add your own rules with
+  `ignore_page_view`.
+- Page views come on top of request events, so HTML traffic sends more events
+  than before; both share the collector's queue and the daily quota.
+
 ## OpenTelemetry
 
 Use selected tracing libraries, not `use_all`. The locally verified setup uses
@@ -339,7 +418,7 @@ RailsMind.flush(timeout: 2)
 
 These are per-process counters. `dropped` counts known local discards, such as queue overflow or oversize payloads. `delivery_unconfirmed` counts events whose delivery attempts ended without a success response, including interrupted in-flight batches; some may have been accepted by the server. `delivered` counts submitted events in batches with a successful HTTP response; it does not prove server retention or background processing. The doctor prints stats for its process; inspect running app stats through your existing operational tooling. Only the routine-request report above sends queue-loss observations to the hosted app. All signal kinds can still undercount after crashes, rejected payloads, hooks, or outages. This is best-effort monitoring, not an accounting ledger; use a transactional outbox when durable business-event delivery is required.
 
-Redaction occurs before buffering and again after custom `before_send`. Sensitive property names are filtered, nesting/string/collection sizes are capped, emails and common credential forms are scrubbed (exception messages included), and backtraces drop machine-home prefixes while keeping a `gems/<name>-<version>/` or `ruby/<version>/` origin for library frames. Error events also name where they happened: `role`, plus the controller action as `route` or the job's `job_class` and `queue`. Bodies, cookies, credentials, SQL binds, and job arguments are never selected by integrations. Arbitrary user-provided text may contain sensitive content that generic redaction cannot recognize: use small, explicitly reviewed business properties. Exception messages can contain whatever your code interpolated into them; review your scrubbing policy, or set `config.capture_exception_message = false` to replace every message with a placeholder before it leaves.
+Redaction occurs before buffering and again after custom `before_send`. Sensitive property names are filtered, nesting/string/collection sizes are capped, emails and common credential forms are scrubbed (exception messages included), and backtraces drop machine-home prefixes while keeping a `gems/<name>-<version>/` or `ruby/<version>/` origin for library frames. Error events also name where they happened: `role`, plus the controller action as `route` or the job's `job_class` and `queue`. Bodies, cookies (other than the SDK's own visitor cookie), credentials, SQL binds, and job arguments are never selected by integrations. Arbitrary user-provided text may contain sensitive content that generic redaction cannot recognize: use small, explicitly reviewed business properties. Exception messages can contain whatever your code interpolated into them; review your scrubbing policy, or set `config.capture_exception_message = false` to replace every message with a placeholder before it leaves.
 
 The final local synthetic burst benchmark on Ruby 4.0.6 processed 10,000 calls in 1.7612 seconds (176.12 μs/call), delivering all 10,000 with zero drops/retries at the 1,000-event queue bound. This measures local sanitization/enqueue with a no-op transport, not production request overhead or network delivery. Earlier runs did overflow; thread scheduling and downstream speed affect the result. Deterministic tests separately verify overflow losses and bounded shutdown during a hung transport. Run `ruby script_benchmark.rb` on the deployment hardware before setting a production budget.
 

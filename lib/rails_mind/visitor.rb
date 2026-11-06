@@ -23,6 +23,7 @@ module RailsMind
     ENV_COOKIE = "rails_mind.visitor_cookie".freeze
     ENV_DAILY = "rails_mind.daily_visitor_id".freeze
     WRITE = "rails_mind.write_visitor_cookie".freeze
+    SEED_DAILY = "rails_mind.seed_daily_visitor".freeze
     PUBLIC = /(?:\A|[,\s])public(?:\z|[,\s=])/i
 
     class << self
@@ -72,11 +73,16 @@ module RailsMind
       # At the request boundary: the visitor's cookie ID, or a fresh one for a GET
       # that may become a counted page view, goes into context so every event of
       # the request carries it. Only a GET can set the cookie, so other requests
-      # without one get no ID.
+      # without one get no ID. Without the cookie, the daily hash waits for the
+      # controller, where the app's own remote IP is known.
       def start(env)
         client = RailsMind.client
         config = client.config
-        return unless client.collector && config.analytics && config.page_views && config.visitor_cookie
+        return unless client.collector && config.analytics && config.page_views
+        unless config.visitor_cookie
+          env[SEED_DAILY] = true
+          return
+        end
         incoming = from_cookie(env["HTTP_COOKIE"])
         env[ENV_COOKIE] = incoming if incoming
         context = Context.current
@@ -85,6 +91,16 @@ module RailsMind
         return unless id
         env[ENV_ID] = id
         context[:visitor_id] = id
+      rescue StandardError
+        nil
+      end
+
+      # When a controller starts, after ActionDispatch::RemoteIp: the daily hash
+      # goes into context so the request's events carry the page view's visitor.
+      def seed_daily(request)
+        return unless request&.get_header(SEED_DAILY) && Context.current[:visitor_id].to_s.empty?
+        id = daily_id(request)
+        Context.current[:visitor_id] = id if id
       rescue StandardError
         nil
       end

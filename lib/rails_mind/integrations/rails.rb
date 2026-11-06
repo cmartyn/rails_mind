@@ -2,6 +2,7 @@ require "active_support/notifications"
 require "active_support/inflector"
 require "digest"
 require_relative "../visitor"
+require_relative "../page_view"
 
 module RailsMind
   module Integrations
@@ -204,6 +205,14 @@ module RailsMind
             end
             RailsMind.client.emit(:request, "#{payload[:controller]}##{payload[:action]}", duration_ms: event.duration,
               status: status.to_s, properties: properties)
+          end
+          subscribe("start_processing.action_controller") do |event|
+            Visitor.seed_daily(event.payload[:request])
+          end
+          subscribe("process_action.action_controller") do |event|
+            client = RailsMind.client
+            config = client.config
+            PageView.record(event.payload, client) if client.collector && config.analytics && config.page_views
           end
           subscribe("sql.active_record") do |event|
             queries = Thread.current[:rails_mind_queries]
