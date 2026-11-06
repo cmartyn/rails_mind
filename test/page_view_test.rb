@@ -19,6 +19,23 @@ class PageViewTest < SDKTest
     def empty = head(:no_content)
   end
 
+  class LiveController < ActionController::Base
+    include ActionController::Live
+    GATE = Queue.new
+
+    # Sends its headers, then waits for the test before the action ends.
+    def show
+      response.headers["Content-Type"] = "text/html"
+      response.stream.write "<p>first</p>"
+      GATE.pop(timeout: 5)
+      response.stream.write "<p>later</p>"
+    ensure
+      response.stream.close
+    end
+
+    def rendered = render(html: "<p>live</p>".html_safe)
+  end
+
   CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36".freeze
   VISITOR = "0b6f2f8e-1c2d-4e5f-9a0b-1c2d3e4f5a6b".freeze
   KEY = ("k" * 32).freeze
@@ -116,6 +133,28 @@ class PageViewTest < SDKTest
     assert_equal 204, status
     assert_nil page_view, "no content is no page"
     assert_nil headers["set-cookie"]
+  end
+
+  # Live sends the headers at the first write or render, before the action
+  # ends and Rails reports it, so no Live response can take the cookie.
+  def test_a_live_response_never_counts_a_cookie_it_could_not_set
+    RailsMind::Visitor.stub(:key, KEY) do
+      [ :show, :rendered ].product([ {}, { "HTTP_COOKIE" => "_rails_mind_visitor=#{VISITOR}" } ]).each do |action, env|
+        @memory.events.clear
+        status, headers, body = RailsMind::Integrations::RequestContext.new(LiveController.action(action)).call(request_env("https://shop.example/live", env))
+        assert_equal 200, status
+        LiveController::GATE << true if action == :show
+        read(body)
+        view = eventually { page_view }
+        label = [ action, env ].inspect
+        assert_nil headers["set-cookie"], label
+        if env.empty?
+          assert_equal [ "daily_hash", daily_hash ], [ view.dig("properties", "visitor_id_kind"), view["visitor_id"] ], label
+        else
+          assert_equal [ "cookie", VISITOR ], [ view.dig("properties", "visitor_id_kind"), view["visitor_id"] ], label
+        end
+      end
+    end
   end
 
   def test_the_apps_hook_can_ignore_page_views_and_never_breaks_the_request
@@ -300,6 +339,15 @@ class PageViewTest < SDKTest
   end
 
   def page_view = @memory.events.find { |event| event["kind"] == "pageview" }
+
+  # ActionController::Live finishes the action on its own thread.
+  def eventually
+    deadline = Time.now + 5
+    until (value = yield) || Time.now > deadline
+      sleep 0.01
+    end
+    value
+  end
 
   # The whole body, closed as a server closes it.
   def read(body)

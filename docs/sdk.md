@@ -194,8 +194,9 @@ the same ID, so an anonymous visit can lead to an outcome. A cookie value that i
 not a UUID the SDK could have made is replaced.
 
 A response marked `Cache-Control: public` never gets the cookie, so shared caches
-keep working. Its page view uses the visitor's cookie when they brought one, and
-otherwise the daily hash.
+keep working. Neither does a response from an `ActionController::Live`
+controller, which sends its headers before the action ends. Their page views use
+the visitor's cookie when they brought one, and otherwise the daily hash.
 
 With `config.visitor_cookie = false`, no cookie is read or set. Page views, and
 the other events of the same request, carry a daily hash instead: an HMAC of the

@@ -46,10 +46,10 @@ module RailsMind
         return false unless counted?(payload, request, response, config)
         properties = properties(request)
         attributes = {}
-        public = public?(response)
-        if cookie_visitor?(request, public, config)
+        settable = settable?(response)
+        if cookie_visitor?(request, settable, config)
           properties["visitor_id_kind"] = "cookie"
-          request.set_header(Visitor::WRITE, { secure: request.ssl? }) unless public
+          request.set_header(Visitor::WRITE, { secure: request.ssl? }) if settable
         else
           properties["visitor_id_kind"] = "daily_hash"
           attributes[:visitor_id] = Visitor.daily_id(request)
@@ -83,11 +83,11 @@ module RailsMind
       end
 
       # The cookie ID the request boundary put in context, unless the response
-      # may be cached publicly and the visitor brought no cookie: a fresh ID
-      # there could never be set, so that page view counts by the daily hash.
-      def cookie_visitor?(request, public, config)
+      # cannot take the cookie and the visitor brought none: a fresh ID there
+      # could never be set, so that page view counts by the daily hash.
+      def cookie_visitor?(request, settable, config)
         return false unless config.visitor_cookie
-        return false if public && !request.get_header(Visitor::ENV_COOKIE)
+        return false if !settable && !request.get_header(Visitor::ENV_COOKIE)
         !Context.current[:visitor_id].to_s.empty?
       end
 
@@ -97,6 +97,14 @@ module RailsMind
         hook ? hook.call(request) : false
       rescue StandardError
         true
+      end
+
+      # Not a response a shared cache may keep, nor one already on its way:
+      # ActionController::Live sends the headers at the first write, before
+      # the action ends.
+      def settable?(response)
+        return false if response.respond_to?(:committed?) && response.committed?
+        !public?(response)
       end
 
       def public?(response)
