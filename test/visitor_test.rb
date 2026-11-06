@@ -7,6 +7,7 @@ require "rails_mind/integrations/rails"
 
 class VisitorTest < SDKTest
   VISITOR = "0b6f2f8e-1c2d-4e5f-9a0b-1c2d3e4f5a6b".freeze
+  BROWSER_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8".freeze
   KEY = ("k" * 32).freeze
 
   def setup
@@ -104,6 +105,23 @@ class VisitorTest < SDKTest
     assert_equal VISITOR, visitor_inside(request_env("REQUEST_METHOD" => "POST", "HTTP_COOKIE" => "_rails_mind_visitor=#{VISITOR}"))
   end
 
+  def test_requests_that_cannot_become_a_page_view_mint_nothing
+    [
+      { "HTTP_ACCEPT" => "application/json" },
+      { "HTTP_ACCEPT" => "*/*" },
+      { "HTTP_ACCEPT" => nil },
+      { "HTTP_TURBO_FRAME" => "comments" },
+      { "HTTP_X_REQUESTED_WITH" => "XMLHttpRequest" },
+      { "HTTP_SEC_PURPOSE" => "prefetch" },
+      { "HTTP_X_SEC_PURPOSE" => "prefetch" }
+    ].each do |extra|
+      assert_nil visitor_inside(request_env(extra).compact), "minted for #{extra}"
+    end
+    turbo_drive = "text/vnd.turbo-stream.html, text/html, application/xhtml+xml"
+    assert_match RailsMind::Visitor::ID, visitor_inside(request_env("HTTP_ACCEPT" => turbo_drive))
+    assert_equal VISITOR, visitor_inside(request_env("HTTP_ACCEPT" => "application/json", "HTTP_COOKIE" => "_rails_mind_visitor=#{VISITOR}"))
+  end
+
   def test_an_id_the_app_already_set_wins
     inside = nil
     RailsMind.with_context(visitor_id: "app-visitor") do
@@ -173,7 +191,8 @@ class VisitorTest < SDKTest
   private
 
   def request_env(extra = {})
-    { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/pricing", "action_dispatch.request_id" => "request-1" }.merge(extra)
+    { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/pricing", "HTTP_ACCEPT" => BROWSER_ACCEPT,
+      "action_dispatch.request_id" => "request-1" }.merge(extra)
   end
 
   def visitor_inside(env)

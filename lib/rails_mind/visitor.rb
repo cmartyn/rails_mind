@@ -70,11 +70,13 @@ module RailsMind
         nil
       end
 
-      # At the request boundary: the visitor's cookie ID, or a fresh one for a GET
-      # that may become a counted page view, goes into context so every event of
-      # the request carries it. Only a GET can set the cookie, so other requests
-      # without one get no ID. Without the cookie, the daily hash waits for the
-      # controller, where the app's own remote IP is known.
+      # At the request boundary: the visitor's cookie ID, or a fresh one for a
+      # browser navigation that may become a counted page view, goes into context
+      # so every event of the request carries it. Only such a request can set the
+      # cookie, so others without one (POSTs, JSON and API GETs, Turbo Frames,
+      # XHRs, prefetches) get no ID that would never be stored. Without the
+      # cookie, the daily hash waits for the controller, where the app's own
+      # remote IP is known.
       def start(env)
         client = RailsMind.client
         config = client.config
@@ -87,12 +89,21 @@ module RailsMind
         env[ENV_COOKIE] = incoming if incoming
         context = Context.current
         return unless context[:visitor_id].to_s.empty?
-        id = incoming || (mint if env["REQUEST_METHOD"] == "GET")
+        id = incoming || (mint if navigation?(env))
         return unless id
         env[ENV_ID] = id
         context[:visitor_id] = id
       rescue StandardError
         nil
+      end
+
+      # A GET a browser makes for a whole HTML page, the only request whose
+      # response can count as a page view and set the cookie.
+      def navigation?(env)
+        return false unless env["REQUEST_METHOD"] == "GET" && env["HTTP_ACCEPT"].to_s.include?("text/html")
+        return false unless env["HTTP_TURBO_FRAME"].to_s.empty?
+        return false if env["HTTP_X_REQUESTED_WITH"].to_s.casecmp?("XMLHttpRequest")
+        %w[HTTP_SEC_PURPOSE HTTP_X_SEC_PURPOSE].none? { |header| env[header].to_s.downcase.include?("prefetch") }
       end
 
       # When a controller starts, after ActionDispatch::RemoteIp: the daily hash

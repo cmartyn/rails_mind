@@ -346,7 +346,8 @@ class PageViewTest < SDKTest
 
   def request_env(url = "https://shop.example/posts/7", env = {})
     Rack::MockRequest.env_for(url, {
-      "HTTP_USER_AGENT" => CHROME, "REMOTE_ADDR" => "203.0.113.9", "action_dispatch.request_id" => "request-1",
+      "HTTP_USER_AGENT" => CHROME, "HTTP_ACCEPT" => "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "REMOTE_ADDR" => "203.0.113.9", "action_dispatch.request_id" => "request-1",
       "action_dispatch.route_uri_pattern" => "/posts/:id(.:format)"
     }.merge(env)).tap { |result| env.each { |key, value| result.delete(key) if value.nil? } }
   end

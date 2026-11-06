@@ -77,6 +77,8 @@ class RedactionCorpusTest < SDKTest
     "qty 2 4111-1111-1111-1111" => %w[4111-1111-1111-1111],
     "cards #{'4111 1111 1111 1111 ' * 300}" => [ "4111 1111 1111 1111" ],
     "applicant SSN 123-45-6789 rejected" => %w[123-45-6789],
+    "/search?q=jane.doe%40example.com&page=2" => %w[jane.doe%40example.com jane.doe example.com],
+    "invite sent to ann@example.org" => %w[ann@example.org],
     "{ssn: \"078-05-1120\"}" => %w[078-05-1120],
     "contact {phone: \"+1 415 555 0100\"}" => [ "415 555 0100" ]
   }.freeze

@@ -180,8 +180,9 @@ request IDs of the request event for the same action. Its properties:
 The page view also carries the visitor ID and, once `identify` has run, the
 user and account IDs. Set `config.link_page_views_to_users = false` to keep user
 and account IDs off page views. Other events still carry them, and RailsMind
-links a visitor to a user from any event that carries both IDs, such as a
-`RailsMind.track` call after `identify`, so the switch does not stop that link.
+also links a visitor to a user from a `RailsMind.track` event that carries both
+IDs, such as one sent after `identify`, so the switch does not stop that link.
+Request, job and error events never link a visitor.
 The IP address is never sent. Every string goes through the same redaction as
 other events. Page views are never sampled and count against the environment's
 daily quota.
@@ -193,8 +194,10 @@ By default the SDK keeps a random visitor ID in a first-party cookie named
 and `Secure` over HTTPS. Each counted page view sets or refreshes it, and a new
 visitor's first page view already carries the ID that response sets. Every event
 of the request, `RailsMind.track` calls and jobs enqueued there included, carries
-the same ID, so an anonymous visit can lead to an outcome. A cookie value that is
-not a UUID the SDK could have made is replaced.
+the same ID, so an anonymous visit can lead to an outcome. A request that cannot
+become a page view (a POST, a JSON or API GET, a Turbo Frame, an XHR or a
+prefetch) gets no new ID; it carries the cookie's ID when the visitor has one.
+A cookie value that is not a UUID the SDK could have made is replaced.
 
 Upgrading to 0.4.0 starts setting this cookie by default. If your privacy notice
 or cookie consent lists the cookies your app sets, update it before you deploy,

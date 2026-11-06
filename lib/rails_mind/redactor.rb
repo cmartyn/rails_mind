@@ -61,7 +61,8 @@ module RailsMind
     # Userinfo runs to the last @ before the path, so an unencoded @ in a
     # password cannot leave its tail behind.
     USERINFO = %r{\b([a-z][a-z0-9+.\-]{0,31}://)[^\s/]*@}i
-    EMAIL = /\b[A-Z0-9._%+\-]{1,128}@[A-Z0-9.\-]{1,253}\.[A-Z]{2,}\b/i
+    # Plain or percent-encoded, as a GET form puts an address in a query string.
+    EMAIL = /\b[A-Z0-9._%+\-]{1,128}(?:@|%40)[A-Z0-9.\-]{1,253}\.[A-Z]{2,}\b/i
     AUTHORIZATION = /((?:proxy-)?authorization["']?\s*(?:=>|[=:])\s*(?:\[(?!FILTERED\]))?\s*["']?)(?:\[FILTERED\]|#{WHOLE_VALUE_SCHEME}|(?:#{SCHEME})?[^\s,;&"']+)/i
     KEY_VALUE = /((?:password|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|authorization)\s*(?:=>|[=:])\s*)(?:#{SCHEME})?[^\s,;&]+/i
     PROVIDER_TOKEN = /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_\w{22,}|(?:AKIA|ASIA)[A-Z0-9]{16}\b|[sr]k_(?:live|test)_[A-Za-z0-9]{10,}|xox[abposr]-[A-Za-z0-9-]{10,}|sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|eyJ[\w-]{5,512}\.[\w-]{5,}\.[\w-]*)/
