@@ -100,8 +100,8 @@ module RailsMind
       end
 
       # Not a response a shared cache may keep, nor one already on its way:
-      # ActionController::Live sends the headers at the first write, before
-      # the action ends.
+      # ActionController::Live sends the headers at the first write or render,
+      # before the action ends.
       def settable?(response)
         return false if response.respond_to?(:committed?) && response.committed?
         !public?(response)
