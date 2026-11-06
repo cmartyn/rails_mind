@@ -179,9 +179,12 @@ request IDs of the request event for the same action. Its properties:
 
 The page view also carries the visitor ID and, once `identify` has run, the
 user and account IDs. Set `config.link_page_views_to_users = false` to keep user
-and account IDs off page views; other events still carry them. The IP address is
-never sent. Every string goes through the same redaction as other events. Page
-views are never sampled and count against the environment's daily quota.
+and account IDs off page views. Other events still carry them, and RailsMind
+links a visitor to a user from any event that carries both IDs, such as a
+`RailsMind.track` call after `identify`, so the switch does not stop that link.
+The IP address is never sent. Every string goes through the same redaction as
+other events. Page views are never sampled and count against the environment's
+daily quota.
 
 ### Visitor cookie
 
@@ -193,10 +196,17 @@ of the request, `RailsMind.track` calls and jobs enqueued there included, carrie
 the same ID, so an anonymous visit can lead to an outcome. A cookie value that is
 not a UUID the SDK could have made is replaced.
 
+Upgrading to 0.4.0 starts setting this cookie by default. If your privacy notice
+or cookie consent lists the cookies your app sets, update it before you deploy,
+or set `config.visitor_cookie = false` (below) or `config.page_views = false`.
+
 A response marked `Cache-Control: public` never gets the cookie, so shared caches
 keep working. Neither does a response from an `ActionController::Live`
 controller, which sends its headers before the action ends. Their page views use
-the visitor's cookie when they brought one, and otherwise the daily hash.
+the visitor's cookie when they brought one, and otherwise the daily hash. For a
+visitor without the cookie, the request's other events (the request event,
+`RailsMind.track` calls and jobs enqueued there) then carry a fresh ID that is
+never stored, so they are not tied to that page view.
 
 With `config.visitor_cookie = false`, no cookie is read or set. Page views, and
 the other events of the same request, carry a daily hash instead: an HMAC of the
@@ -223,7 +233,9 @@ RailsMind counts days in that zone.
   Add `<meta name="turbo-prefetch" content="false">` to the layout to count
   those visits.
 - Pages served from a CDN or a browser cache never reach the app and are not
-  counted. A `304 Not Modified` from `Rack::ConditionalGet` still counts.
+  counted. A `304 Not Modified` from `Rack::ConditionalGet` still counts; one
+  the controller sends through `fresh_when` or `stale?` does not, because the
+  action rendered no page.
 - Bot filtering is a built-in user-agent list. Add your own rules with
   `ignore_page_view`.
 - Page views come on top of request events, so HTML traffic sends more events
@@ -246,10 +258,12 @@ and `RailsMind::Integrations.mirror_ahoy!`; the require now fails at boot.
 - A hosted-only `class Ahoy::Store < RailsMind::Integrations::AhoyStore` goes.
   Remove `ahoy_matey` too, or define `class Ahoy::Store < Ahoy::BaseStore; end`,
   because Ahoy needs an `Ahoy::Store`.
-- Delete the copied `app/javascript/rails_mind.js`, its importmap pin, any asset
-  path into the gem, and the `rails-mind-page` meta tag. Custom events sent from
-  the browser are no longer supported; record them on the server with
-  `RailsMind.track`.
+- Delete the copied `app/javascript/rails_mind.js`, its importmap pin, the
+  `import { start } from "rails_mind"` line and the `start(...)` call in your
+  JavaScript entry point, any asset path into the gem, and the `rails-mind-page`
+  meta tag. An import left without its pin stops the whole entry point from
+  loading. Custom events sent from the browser are no longer supported; record
+  them on the server with `RailsMind.track`.
 
 Ahoy itself keeps working for your own reports; RailsMind no longer reads it.
 
