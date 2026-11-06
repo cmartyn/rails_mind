@@ -21,6 +21,13 @@ RailsMind.configure do |config|
   # literals replaced and comments removed). Set false to send the fingerprints only.
   # config.capture_query_shapes = false
   # config.before_send = ->(event) { event } # Return nil to drop an event.
+
+  # Page views: each HTML page a controller renders for a person (not a bot, prefetch,
+  # Turbo Frame or health check) is counted, with a first-party visitor cookie.
+  # config.page_views = false # Count no page views.
+  # config.visitor_cookie = false # Count visitors by a daily hash instead of a cookie.
+  # config.link_page_views_to_users = false # Keep user and account IDs off page views.
+  # config.ignore_page_view = ->(request) { request.path.start_with?("/admin") }
 end
 
 # No existing Ahoy store, Flipper adapter, or OpenTelemetry provider is changed.

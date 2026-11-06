@@ -22,9 +22,13 @@ module RailsMind
         release_present: !@config.release.to_s.strip.empty?,
         enabled: @config.enabled?,
         automatic_sampling: @config.automatic_sampling,
+        page_views: @config.page_views,
+        visitor_cookie: @config.visitor_cookie,
+        link_page_views_to_users: @config.link_page_views_to_users,
         plan: [
           "Add one initializer. No database migrations or Gemfile changes.",
           "Requests: automatic sampling of routine successes; jobs via Rails notifications and errors via Rails.error stay unsampled.",
+          "Page views: HTML pages your controllers render are counted with a first-party visitor cookie; config.page_views, config.visitor_cookie and config.link_page_views_to_users turn parts off.",
           detected["ahoy_matey"] ? "Ahoy detected: keep current store; explicitly opt into mirror mode after review." : "Analytics: optionally add ahoy_matey; choose hosted-only store or existing database store.",
           detected["opentelemetry-sdk"] ? "OpenTelemetry detected: attach RailsMind exporter after existing SDK setup; preserve sampler and exporters." : "APM traces: optionally add selected OpenTelemetry libraries and explicitly configure one provider.",
           detected["flipper"] ? "Flipper detected: observe notifications only; preserve adapter, groups, targeting and cache." : "Flags: Flipper is optional. No flag configuration is created.",

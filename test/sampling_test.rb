@@ -14,7 +14,7 @@ class SamplingTest < SDKTest
     refute @sampling.consider(request).first
     [ { "status" => "400" }, { "status" => "500" }, { "status" => nil }, { "status" => "error" },
       { "duration_ms" => 1000 }, { "duration_ms" => nil }, { "properties" => { "repeated_query_count" => 3 } },
-      { "kind" => "error" }, { "kind" => "event" }, { "kind" => "visit" }, { "kind" => "job" },
+      { "kind" => "error" }, { "kind" => "event" }, { "kind" => "visit" }, { "kind" => "pageview" }, { "kind" => "job" },
       { "kind" => "span" }, { "kind" => "flag" }, { "kind" => "check" } ].each do |attributes|
       assert @sampling.consider(request.merge(attributes)).first, attributes.inspect
     end

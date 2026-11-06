@@ -53,6 +53,18 @@ class SamplingCollectorTest < SDKTest
     end
   end
 
+  def test_page_views_bypass_sampling_at_rate_zero
+    with_collector(rate: 0) do |collector, transport, client|
+      assert client.emit(:pageview, "PostsController#show", properties: { route: "/posts/:id" })
+      assert collector.flush(timeout: 1)
+      event = transport.bodies.flat_map { |body| JSON.parse(body)["events"] }.sole
+      assert_equal "pageview", event["kind"]
+      refute event["properties"].key?("rails_mind_sampling")
+      assert_equal 0, collector.stats.dig(:sampling, :sampled_out)
+      assert_equal 1, collector.stats[:delivered]
+    end
+  end
+
   def test_selected_counts_queue_loss_and_immutable_report_survive_429_retry
     @config.queue_capacity = 1
     with_collector(rate: 1) do |collector, transport, client|

@@ -46,6 +46,17 @@ class ClientTest < SDKTest
     refute @client.emit(:event, "Paid")
   end
 
+  def test_page_views_need_both_analytics_and_page_views
+    assert @client.emit(:pageview, "PostsController#show")
+    assert_equal "pageview", @memory.events.last["kind"]
+    @config.page_views = false
+    refute @client.emit(:pageview, "PostsController#show")
+    @config.page_views = true
+    @config.analytics = false
+    refute @client.emit(:pageview, "PostsController#show")
+    assert_equal 1, @memory.events.size
+  end
+
   def test_exception_messages_scrubbed_by_default_omitted_on_opt_out_and_same_object_deduplicated
     error = RuntimeError.new("private balance 1000 password=swordfish for ann@example.com")
     error.set_backtrace([ "/Users/private/app/controllers/invoices_controller.rb:12:in 'show'" ])

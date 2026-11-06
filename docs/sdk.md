@@ -42,7 +42,10 @@ RailsMind instance, set `RAILS_MIND_ENDPOINT` (for example,
 default. HTTPS is required except for localhost/loopback development. The key
 controls application/environment scope; never give it to browser JavaScript.
 Collection stays off without a nonblank key. `apm`, `errors`, `analytics`, and
-`flags` can each be disabled in the initializer.
+`flags` can each be disabled in the initializer. [Page views](#page-views) have
+their own switches: `page_views`, `visitor_cookie` and `link_page_views_to_users`
+(each `true` or `false`, on by default) and `ignore_page_view` (a callable that
+receives the request). Switches are set in code, never read from the environment.
 
 Release detection uses the first nonblank value in this order:
 
@@ -205,8 +208,8 @@ uses the same selection rule, so the two samplers do not multiply probabilities.
 Only completed `request` events with status 200–399, a finite duration from zero
 to below 1,000 ms, and fewer than three repeated queries are eligible. Slow,
 failed, unknown-duration, and repeated-query requests remain unsampled, as do
-business events, errors, jobs, mailer observations, visits, flags, checks, and
-OpenTelemetry spans. This preserves their sampling priority, not guaranteed
+business events, page views, errors, jobs, mailer observations, visits, flags,
+checks, and OpenTelemetry spans. This preserves their sampling priority, not guaranteed
 delivery: queue bounds, payload limits, outages, and the server's hard daily quota
 still apply. Existing OpenTelemetry samplers remain authoritative; this feature
 does not promise complete distributed traces.
