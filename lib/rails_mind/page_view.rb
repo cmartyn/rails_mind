@@ -22,7 +22,12 @@ module RailsMind
     NO_COUNTRY = %w[XX T1].freeze
     PREFETCH_HEADERS = %w[HTTP_SEC_PURPOSE HTTP_X_SEC_PURPOSE].freeze
     NO_CONTENT = [ 204, 205 ].freeze
-    FRAMEWORK_CONTROLLER = /\A(?:Rails|ActiveStorage)::/
+    # Rails' own pages, Active Storage, and the stub pages turbo-rails serves a
+    # Hotwire Native app to recede, resume or refresh.
+    FRAMEWORK_CONTROLLER = /\A(?:Rails|ActiveStorage|Turbo::Native)::/
+    FILTERED = "[FILTERED]".freeze
+    # A path parameter shorter than this is masked only as a whole segment.
+    SUBSTRING_MASK_MIN = 8
     # Crawlers, link previews, LLM fetchers, monitors and bare HTTP clients. A
     # blank user agent is not counted either. "cloudfront" is what CloudFront
     # sends when a distribution does not forward the caller's user agent.
@@ -64,6 +69,9 @@ module RailsMind
         return false unless (payload[:method] || request.request_method) == "GET"
         return false unless (200..299).cover?(payload[:status].to_i)
         return false unless html?(payload, response)
+        # A browser asks for HTML when it loads a page; scripts, pollers and bare
+        # HTTP clients that take whatever comes back are not people reading it.
+        return false unless request.get_header("HTTP_ACCEPT").to_s.include?("text/html")
         return false unless request.get_header("HTTP_TURBO_FRAME").to_s.empty?
         return false if PREFETCH_HEADERS.any? { |header| request.get_header(header).to_s.downcase.include?("prefetch") }
         return false if request.xhr?
@@ -117,9 +125,9 @@ module RailsMind
         values = {}
         route = route(request)
         values["route"] = route if route
-        values["path"] = request.filtered_path.to_s[0, PATH_LIMIT]
+        values["path"] = path(request)[0, PATH_LIMIT]
         values["host"] = request.host.to_s.downcase[0, HOST_LIMIT]
-        referrer = referrer(request.referer)
+        referrer = referrer(request.referer, request.host)
         values["referrer"] = referrer if referrer
         values.merge!(tags(request))
         values["user_agent"] = request.user_agent.to_s[0, USER_AGENT_LIMIT]
@@ -140,14 +148,57 @@ module RailsMind
         nil
       end
 
-      # Scheme, host and path only: a referring URL's query and fragment stay home.
-      def referrer(value)
+      # The query string goes through the app's filter_parameters, and so do
+      # the route's own segments: a token in /passwords/:token/edit is masked
+      # like one in ?token=.
+      def path(request)
+        path = request.filtered_path.to_s
+        secrets = filtered_path_values(request)
+        return path if secrets.empty?
+        route_part, query = path.split("?", 2)
+        segments = route_part.split("/", -1).map { |segment| secret_segment?(segment, secrets) ? FILTERED : segment }
+        masked = segments.join("/")
+        secrets.each { |secret| masked = masked.gsub(secret, FILTERED) if secret.length >= SUBSTRING_MASK_MIN }
+        query ? "#{masked}?#{query}" : masked
+      rescue StandardError
+        request.filtered_path.to_s
+      end
+
+      # Each path parameter the app's filter masks, as written and as escaped.
+      def filtered_path_values(request)
+        params = request.path_parameters.except(:controller, :action, :format)
+        return [] if params.empty?
+        filtered = request.parameter_filter.filter(params)
+        params.each_with_object([]) do |(key, value), secrets|
+          next unless value.is_a?(String) && !value.empty? && filtered[key] != value
+          secrets.push(value, Rack::Utils.escape_path(value), Rack::Utils.escape(value).gsub("+", "%20"))
+        end.uniq
+      end
+
+      def secret_segment?(segment, secrets)
+        secrets.include?(segment) || secrets.include?(Rack::Utils.unescape_path(segment))
+      rescue StandardError
+        false
+      end
+
+      # Another site's scheme, host and path; its query and fragment stay home.
+      # A link inside the app sends only its origin, since its path can hold
+      # what the app masks in its own paths (a reset token, for one).
+      def referrer(value, host = nil)
         return unless value.is_a?(String) && !value.strip.empty?
         uri = URI.parse(value.strip)
         return unless uri.is_a?(URI::HTTP) && !uri.host.to_s.empty?
-        "#{uri.scheme.downcase}://#{uri.host.downcase}#{uri.path}"[0, REFERRER_LIMIT]
+        origin = "#{uri.scheme.downcase}://#{uri.host.downcase}"
+        return origin if same_site?(uri.host, host)
+        "#{origin}#{uri.path}"[0, REFERRER_LIMIT]
       rescue URI::Error
         nil
+      end
+
+      def same_site?(referrer_host, host)
+        return false if host.to_s.empty?
+        bare = ->(name) { name.to_s.downcase.delete_prefix("www.") }
+        bare.call(referrer_host) == bare.call(host)
       end
 
       # A tag the app's filter_parameters would mask in the path is not sent.

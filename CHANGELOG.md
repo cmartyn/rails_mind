@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 — 2026-11-06
+
+Fixes for page views. Upgrade from 0.4.0 before deploying it.
+
+- A route segment your `filter_parameters` masks is masked in the page view's `path`, as the query already was: `/passwords/:token/edit` (the Rails authentication generator's reset page) sends `/passwords/[FILTERED]/edit`, not the reset token. 0.4.0 sent the token.
+- A referrer inside the app sends only its origin, since its path can hold what the app masks in its own paths. Other sites' referrers keep their path.
+- Only a GET whose `Accept` header asks for `text/html` counts. Pollers and scripts that accept anything (`*/*`), such as GoodJob's live dashboard and bare HTTP clients, no longer count as page views.
+- The `Turbo::Native::` stub pages Hotwire Native apps load to recede, resume or refresh are not counted.
+
 ## 0.4.0 — 2026-11-06
 
 Breaking: the Ahoy integration and the Ahoy-based browser adapter are gone. RailsMind counts page views itself. An app that keeps Ahoy for its own reports keeps it unchanged.

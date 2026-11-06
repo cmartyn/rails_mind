@@ -3,7 +3,7 @@
 The gem is `rails_mind`, namespace `RailsMind`. Install the MIT-licensed client
 from RubyGems.org and commit the application lockfile to retain the selected
 version. The hosted RailsMind service is a separate, proprietary application.
-Version 0.4.0 is an early release with the [documented compatibility limits](compatibility.md).
+Version 0.4.1 is an early release with the [documented compatibility limits](compatibility.md).
 
 ## Install
 
@@ -147,13 +147,17 @@ ActiveJob serializes only the context identifier allowlist under `rails_mind_con
 ## Page views
 
 With `analytics` and `page_views` on (the default), the SDK counts a page view
-for each HTML page a controller renders for a person: a GET answered with a 2xx
-`text/html` response. These are not counted:
+for each HTML page a controller renders for a person: a GET whose `Accept`
+header asks for `text/html`, answered with a 2xx `text/html` response. Browsers
+and Turbo always ask for HTML when they load a page; pollers, scripts and bare
+HTTP clients that accept anything (`*/*`) are not counted. These are not counted
+either:
 
 - Turbo Frame requests, prefetches (`Sec-Purpose` or `X-Sec-Purpose: prefetch`)
   and XHRs;
-- `Rails::` controllers (the `/up` health check included) and `ActiveStorage::`
-  controllers;
+- `Rails::` controllers (the `/up` health check included), `ActiveStorage::`
+  controllers and the `Turbo::Native::` stub pages Hotwire Native apps load to
+  recede, resume or refresh;
 - a blank or known-bot user agent (crawlers, link previews, LLM fetchers, uptime
   monitors and bare HTTP clients);
 - anything your `ignore_page_view` hook returns true for. It receives the
@@ -169,9 +173,9 @@ request IDs of the request event for the same action. Its properties:
 | Property | What it holds |
 | --- | --- |
 | `route` | The route pattern, such as `/posts/:id`, without `(.:format)`; a mounted engine's starts with its mount path |
-| `path` | The path and query string, with the app's `filter_parameters` applied (at most 1,000 characters) |
+| `path` | The path and query string, with the app's `filter_parameters` applied to the query and to route segments, so `/passwords/:token/edit` sends `/passwords/[FILTERED]/edit` (at most 1,000 characters) |
 | `host` | The request's host |
-| `referrer` | The referring URL's scheme, host and path; its query and fragment are not sent |
+| `referrer` | Another site's scheme, host and path; its query and fragment are not sent. A link inside the app sends only its origin |
 | `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `ref` | Those query parameters, at most 200 characters each; one your `filter_parameters` masks is not sent |
 | `user_agent` | The user agent, at most 500 characters; RailsMind derives device, browser and OS from it |
 | `country` | Two letters from `CF-IPCountry` or `CloudFront-Viewer-Country`, when present |

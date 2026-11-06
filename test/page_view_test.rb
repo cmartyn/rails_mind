@@ -100,6 +100,10 @@ class PageViewTest < SDKTest
       "health check" => -> { visit(controller: "Rails::HealthController", action: "show") },
       "Rails controller" => -> { visit(controller: "Rails::WelcomeController", action: "index") },
       "Active Storage" => -> { visit(controller: "ActiveStorage::Blobs::RedirectController", action: "show") },
+      "Hotwire Native recede stub" => -> { visit(controller: "Turbo::Native::NavigationController", action: "recede") },
+      "Accept */* (a poller or script)" => -> { visit(env: { "HTTP_ACCEPT" => "*/*" }) },
+      "Accept JSON" => -> { visit(env: { "HTTP_ACCEPT" => "application/json" }) },
+      "no Accept header" => -> { visit(env: { "HTTP_ACCEPT" => nil }) },
       "Googlebot" => -> { visit(env: { "HTTP_USER_AGENT" => "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)" }) },
       "GPTBot" => -> { visit(env: { "HTTP_USER_AGENT" => "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2)" }) },
       "curl" => -> { visit(env: { "HTTP_USER_AGENT" => "curl/8.7.1" }) },
@@ -330,6 +334,43 @@ class PageViewTest < SDKTest
     visit("https://shop.example/reset?password=hunter2&utm_source=mail", env: { "action_dispatch.parameter_filter" => [ :password ] })
     assert_equal "/reset?password=[FILTERED]&utm_source=mail", page_view.dig("properties", "path")
     refute_includes JSON.generate(@memory.events), "hunter2"
+  end
+
+  def test_route_segments_the_apps_filter_parameters_mask_are_masked_in_the_path
+    token = "eyJfcmFpbHMiOnsiZGF0YSI6WzFdfX0=--0123456789abcdef0123"
+    visit("https://shop.example/passwords/#{token}/edit?token=#{token}&page=2", env: {
+      "action_dispatch.parameter_filter" => [ :token ],
+      "action_dispatch.route_uri_pattern" => "/passwords/:token/edit(.:format)",
+      "action_dispatch.request.path_parameters" => { controller: "passwords", action: "edit", token: token }
+    })
+    properties = page_view["properties"]
+    assert_equal "/passwords/[FILTERED]/edit?token=[FILTERED]&page=2", properties["path"]
+    assert_equal "/passwords/:token/edit", properties["route"]
+    refute_includes JSON.generate(page_view), "0123456789abcdef0123"
+
+    @memory.events.clear
+    visit("https://shop.example/s/ab12/posts/7", env: {
+      "action_dispatch.parameter_filter" => [ :token ],
+      "action_dispatch.request.path_parameters" => { controller: "shares", action: "show", share_token: "ab12", id: "7" }
+    })
+    assert_equal "/s/[FILTERED]/posts/7", page_view.dig("properties", "path"), "a short secret goes as a whole segment; other parameters stay"
+
+    @memory.events.clear
+    visit("https://shop.example/files/a%2Fb%20c", env: {
+      "action_dispatch.parameter_filter" => [ :secret ],
+      "action_dispatch.request.path_parameters" => { controller: "files", action: "show", secret: "a/b c" }
+    })
+    assert_equal "/files/[FILTERED]", page_view.dig("properties", "path"), "an escaped secret is masked too"
+  end
+
+  def test_a_link_inside_the_app_sends_only_its_origin_as_referrer
+    { "https://shop.example/passwords/secret-token/edit?x=1" => "https://shop.example",
+      "https://www.shop.example/posts/3" => "https://www.shop.example",
+      "https://news.example/item/42?id=9" => "https://news.example/item/42" }.each do |referrer, sent|
+      @memory.events.clear
+      visit("https://shop.example/posts/7", env: { "HTTP_REFERER" => referrer })
+      assert_equal sent, page_view.dig("properties", "referrer"), referrer
+    end
   end
 
   def test_a_tag_the_apps_filter_parameters_mask_is_not_sent
