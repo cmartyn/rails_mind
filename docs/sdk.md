@@ -172,7 +172,7 @@ request IDs of the request event for the same action. Its properties:
 | `path` | The path and query string, with the app's `filter_parameters` applied (at most 1,000 characters) |
 | `host` | The request's host |
 | `referrer` | The referring URL's scheme, host and path; its query and fragment are not sent |
-| `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `ref` | Those query parameters, at most 200 characters each |
+| `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `ref` | Those query parameters, at most 200 characters each; one your `filter_parameters` masks is not sent |
 | `user_agent` | The user agent, at most 500 characters; RailsMind derives device, browser and OS from it |
 | `country` | Two letters from `CF-IPCountry` or `CloudFront-Viewer-Country`, when present |
 | `visitor_id_kind` | `cookie` or `daily_hash` (below) |

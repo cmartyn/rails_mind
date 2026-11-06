@@ -150,11 +150,13 @@ module RailsMind
         nil
       end
 
+      # A tag the app's filter_parameters would mask in the path is not sent.
       def tags(request)
         query = request.GET
-        TAGS.each_with_object({}) do |key, tags|
-          value = query[key]
-          next unless value.is_a?(String)
+        raw = TAGS.each_with_object({}) { |key, values| values[key] = query[key] if query[key].is_a?(String) }
+        filtered = request.parameter_filter.filter(raw)
+        raw.each_with_object({}) do |(key, value), tags|
+          next unless filtered[key] == value
           value = value.strip
           tags[key] = value[0, TAG_LIMIT] unless value.empty?
         end

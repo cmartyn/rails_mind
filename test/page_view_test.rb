@@ -332,6 +332,16 @@ class PageViewTest < SDKTest
     refute_includes JSON.generate(@memory.events), "hunter2"
   end
 
+  def test_a_tag_the_apps_filter_parameters_mask_is_not_sent
+    visit("https://shop.example/posts/7?utm_source=news&ref=secretref&utm_term=x", env: { "action_dispatch.parameter_filter" => [ :ref, ->(key, value) { value.replace("masked") if key == "utm_term" } ] })
+    properties = page_view["properties"]
+    assert_equal "/posts/7?utm_source=news&ref=[FILTERED]&utm_term=masked", properties["path"]
+    assert_equal "news", properties["utm_source"]
+    refute properties.key?("ref"), "masked in the path, so not sent beside it"
+    refute properties.key?("utm_term"), "a filter that rewrites the value masks it too"
+    refute_includes JSON.generate(@memory.events), "secretref"
+  end
+
   private
 
   def request_env(url = "https://shop.example/posts/7", env = {})
