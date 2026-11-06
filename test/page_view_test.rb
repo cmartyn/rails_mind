@@ -384,6 +384,16 @@ class PageViewTest < SDKTest
       secret_visit.call("https://shop.example/passwords/#{token}/edit?back=/passwords/#{token}/edit", [ :token ], { token: token })["path"],
       "a long secret repeated in the query"
 
+    assert_equal "/files/[FILTERED]/[FILTERED]", secret_visit.call("https://shop.example/files/q%5B1%5D/x9", [ :secret ], { secret: "q[1]/x9" })["path"],
+      "a glob secret the URL helper escaped"
+    refute_includes secret_visit.call("https://shop.example/share/abc/abc/hidden", [ :token, :secret ], { share_token: "abc", secret_path: "abc/hidden" })["path"],
+      "hidden", "a glob secret another secret overlaps"
+    assert_equal "/s/[FILTERED]?back=[FILTERED]&page=2", secret_visit.call("https://shop.example/s/ab12?back=%2Fs%2Fab12&page=2", [ :token ], { token: "ab12" })["path"],
+      "a short secret in a back link"
+    tagged = secret_visit.call("https://shop.example/s/#{token}?utm_content=#{token}&utm_source=mail", [ :token ], { token: token })
+    refute tagged.key?("utm_content"), "a campaign tag holding a masked route value is not sent"
+    assert_equal "mail", tagged["utm_source"]
+
     properties = secret_visit.call("https://shop.example/t/sekr3t-account-token/blog/posts/1", [ :token ], { account_token: "sekr3t-account-token", id: "1" },
       { "SCRIPT_NAME" => "/t/sekr3t-account-token/blog", "PATH_INFO" => "/posts/1", "action_dispatch.route_uri_pattern" => "/posts/:id(.:format)" })
     assert_equal "/t/[FILTERED]/blog/posts/:id", properties["route"], "a mounted engine's masked mount segment"

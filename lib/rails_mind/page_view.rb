@@ -130,7 +130,7 @@ module RailsMind
         values["host"] = request.host.to_s.downcase[0, HOST_LIMIT]
         referrer = referrer(request.referer, request.host)
         values["referrer"] = referrer if referrer
-        values.merge!(tags(request))
+        values.merge!(tags(request, secret_values(request)))
         values["user_agent"] = request.user_agent.to_s[0, USER_AGENT_LIMIT]
         country = country(request)
         values["country"] = country if country
@@ -185,13 +185,37 @@ module RailsMind
         return text if text.empty?
         route_part, query = text.b.split("?", 2)
         filtered = FILTERED.b
-        masked = route_part.split("/", -1).map { |segment| secret_in?(segment, secrets) ? filtered : segment }.join("/")
-        secrets.each { |secret| masked = masked.gsub(secret, filtered) if secret.include?("/") }
-        if query
-          secrets.each { |secret| query = query.gsub(secret, filtered) if secret.bytesize >= QUERY_MASK_MIN }
-          masked = "#{masked}?#{query}".b
-        end
+        globs = secrets.select { |secret| secret.include?("/".b) }
+        globs.each { |secret| route_part = route_part.gsub(secret, filtered) }
+        pieces = (secrets + globs.flat_map { |secret| secret.split("/".b) }).reject(&:empty?).uniq
+        masked = route_part.split("/", -1).map { |segment| secret_in?(segment, pieces) ? filtered : segment }.join("/")
+        masked = "#{masked}?#{mask_query(query, secrets)}".b if query
         masked.force_encoding(Encoding::UTF_8).scrub
+      end
+
+      # A long secret goes wherever it appears; a query value that is, or holds
+      # as a path piece, any secret goes whole (a back link to the masked page).
+      def mask_query(query, secrets)
+        filtered = FILTERED.b
+        secrets.each { |secret| query = query.gsub(secret, filtered) if secret.bytesize >= QUERY_MASK_MIN }
+        query.split("&".b, -1).map do |pair|
+          key, value = pair.split("=".b, 2)
+          next pair unless value
+          decoded = begin
+            Rack::Utils.unescape(value).b
+          rescue StandardError
+            value
+          end
+          pieces = decoded.split("/".b)
+          secrets.any? { |secret| decoded == secret || pieces.include?(secret) } ? "#{key}=#{filtered}".b : pair
+        end.join("&".b)
+      end
+
+      # The route's masked values, for the path and the campaign tags.
+      def secret_values(request)
+        filtered_path_values(request)
+      rescue StandardError
+        []
       end
 
       def secret_in?(segment, secrets)
@@ -223,13 +247,15 @@ module RailsMind
         bare.call(referrer_host) == bare.call(host)
       end
 
-      # A tag the app's filter_parameters would mask in the path is not sent.
-      def tags(request)
+      # A tag the app's filter_parameters would mask in the query is not sent,
+      # nor one holding a value it masks in the route.
+      def tags(request, secrets = [])
         query = request.GET
         raw = TAGS.each_with_object({}) { |key, values| values[key] = query[key] if query[key].is_a?(String) }
         filtered = request.parameter_filter.filter(raw)
         raw.each_with_object({}) do |(key, value), tags|
           next unless filtered[key] == value
+          next if secrets.any? { |secret| value.b.include?(secret) }
           value = value.strip
           tags[key] = value[0, TAG_LIMIT] unless value.empty?
         end
