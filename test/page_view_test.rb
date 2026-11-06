@@ -2,10 +2,23 @@ require_relative "test_helper"
 require "minitest/mock"
 require "active_support"
 require "action_dispatch"
+require "action_controller"
+require "action_view"
+require "action_view/testing/resolvers"
 require "rack/mock"
 require "rails_mind/integrations/rails"
 
 class PageViewTest < SDKTest
+  # Real controllers, for responses Rails finishes after the action returns.
+  class StreamingController < ActionController::Base
+    self.view_paths = ActionView::FixtureResolver.new("pages/show.html.erb" => "<p>post</p>",
+      "layouts/page.html.erb" => "<html><body><%= yield %></body></html>")
+    layout "page"
+
+    def show = render(template: "pages/show", stream: true)
+    def empty = head(:no_content)
+  end
+
   CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36".freeze
   VISITOR = "0b6f2f8e-1c2d-4e5f-9a0b-1c2d3e4f5a6b".freeze
   KEY = ("k" * 32).freeze
@@ -86,6 +99,23 @@ class PageViewTest < SDKTest
     @memory.events.clear
     visit(status: 203)
     refute_nil page_view, "any 2xx counts"
+  end
+
+  def test_a_streamed_template_counts_like_any_html_page
+    _status, headers, body = RailsMind::Integrations::RequestContext.new(StreamingController.action(:show)).call(request_env)
+    assert_equal "<html><body><p>post</p></body></html>", read(body)
+    assert_equal "text/html; charset=utf-8", headers["content-type"]
+    view = page_view
+    refute_nil view, "Rails types a streamed template only when the response commits"
+    assert_equal "PageViewTest::StreamingController#show", view["name"]
+    assert_includes Array(headers["set-cookie"]).join, "_rails_mind_visitor=#{view['visitor_id']}"
+
+    @memory.events.clear
+    status, headers, body = RailsMind::Integrations::RequestContext.new(StreamingController.action(:empty)).call(request_env)
+    read(body)
+    assert_equal 204, status
+    assert_nil page_view, "no content is no page"
+    assert_nil headers["set-cookie"]
   end
 
   def test_the_apps_hook_can_ignore_page_views_and_never_breaks_the_request
@@ -270,6 +300,15 @@ class PageViewTest < SDKTest
   end
 
   def page_view = @memory.events.find { |event| event["kind"] == "pageview" }
+
+  # The whole body, closed as a server closes it.
+  def read(body)
+    chunks = +""
+    body.each { |chunk| chunks << chunk }
+    chunks
+  ensure
+    body.close if body.respond_to?(:close)
+  end
 
   def daily_hash = OpenSSL::HMAC.hexdigest("SHA256", KEY, "#{RailsMind::Visitor.today.iso8601}\n203.0.113.9\n#{CHROME}")[0, 32]
 end

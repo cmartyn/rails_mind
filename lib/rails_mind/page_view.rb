@@ -21,6 +21,7 @@ module RailsMind
     # Cloudflare's unknown country and Tor.
     NO_COUNTRY = %w[XX T1].freeze
     PREFETCH_HEADERS = %w[HTTP_SEC_PURPOSE HTTP_X_SEC_PURPOSE].freeze
+    NO_CONTENT = [ 204, 205 ].freeze
     FRAMEWORK_CONTROLLER = /\A(?:Rails|ActiveStorage)::/
     # Crawlers, link previews, LLM fetchers, monitors and bare HTTP clients. A
     # blank user agent is not counted either. "cloudfront" is what CloudFront
@@ -62,7 +63,7 @@ module RailsMind
       def counted?(payload, request, response, config)
         return false unless (payload[:method] || request.request_method) == "GET"
         return false unless (200..299).cover?(payload[:status].to_i)
-        return false unless response.media_type == "text/html"
+        return false unless html?(payload, response)
         return false unless request.get_header("HTTP_TURBO_FRAME").to_s.empty?
         return false if PREFETCH_HEADERS.any? { |header| request.get_header(header).to_s.downcase.include?("prefetch") }
         return false if request.xhr?
@@ -70,6 +71,15 @@ module RailsMind
         user_agent = request.user_agent.to_s
         return false if user_agent.strip.empty? || user_agent.match?(BOT)
         !ignored?(config, request)
+      end
+
+      # Rails types a streamed template only when the response commits, as
+      # text/html like any response still untyped. An HTML request answered
+      # with content and no type yet is such a page.
+      def html?(payload, response)
+        type = response.media_type
+        return type == "text/html" if type
+        payload[:format] == :html && !NO_CONTENT.include?(payload[:status].to_i)
       end
 
       # The cookie ID the request boundary put in context, unless the response
