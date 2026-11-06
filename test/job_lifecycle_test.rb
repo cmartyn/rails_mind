@@ -49,15 +49,17 @@ class JobLifecycleTest < SDKTest
 
   def test_request_enqueue_and_serialized_execution_share_native_trace
     job = nil
+    visitor = "0b6f2f8e-1c2d-4e5f-9a0b-1c2d3e4f5a6b"
     app = ->(_env) do
-      RailsMind.identify(user_id: "user-1", visitor_id: "visitor-1")
+      RailsMind.identify(user_id: "user-1")
       ActiveSupport::Notifications.instrument("process_action.action_controller",
         controller: "InvitesController", action: "create", status: 201) do
         job = LifecycleJob.perform_later("private-argument")
       end
       [ 201, {}, [] ]
     end
-    RailsMind::Integrations::RequestContext.new(app).call("action_dispatch.request_id" => "request-1")
+    RailsMind::Integrations::RequestContext.new(app).call("action_dispatch.request_id" => "request-1",
+      "REQUEST_METHOD" => "POST", "HTTP_COOKIE" => "_rails_mind_visitor=#{visitor}")
     serialized = job.serialize
     ActiveJob::Base.execute(serialized)
 
@@ -67,6 +69,7 @@ class JobLifecycleTest < SDKTest
     assert_equal [ trace ], events.map { |event| event["trace_id"] }.uniq
     assert_equal trace, serialized.dig("rails_mind_context", "trace_id")
     assert_equal [ "user-1" ], events.map { |event| event["user_id"] }.uniq
+    assert_equal [ visitor ], events.map { |event| event["visitor_id"] }.uniq, "the visitor cookie reaches the job"
     assert_equal [ "request-1" ], events.map { |event| event["request_id"] }.uniq
     assert_equal %w[enqueue perform_start perform], lifecycle.map { |event| event.dig("properties", "operation") }
     assert_equal %w[span span job], lifecycle.map { |event| event["kind"] }

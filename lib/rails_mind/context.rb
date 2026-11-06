@@ -39,8 +39,14 @@ module RailsMind
       Thread.current[:rails_mind_context] = previous
     end
 
-    def identify(user_id: nil, account_id: nil, visitor_id: nil)
-      current.merge!(user_id: user_id&.to_s, account_id: account_id&.to_s, visitor_id: visitor_id&.to_s)
+    UNSET = Object.new.freeze
+
+    # Signing in names the user and account; the visitor stays the one this
+    # request already carries unless visitor_id is passed (nil clears it).
+    def identify(user_id: nil, account_id: nil, visitor_id: UNSET)
+      values = { user_id: user_id&.to_s, account_id: account_id&.to_s }
+      values[:visitor_id] = visitor_id&.to_s unless UNSET.equal?(visitor_id)
+      current.merge!(values)
     end
 
     def suppressed? = Thread.current[:rails_mind_suppressed] == true

@@ -3,11 +3,12 @@ require_relative "test_helper"
 class ClientTest < SDKTest
   def test_identity_restores_across_request_boundaries_and_is_fiber_local
     RailsMind.with_context(request_id: "request-1", visitor_id: "visitor-1") do
-      RailsMind.identify(user_id: 21, account_id: 7, visitor_id: "visitor-1")
+      RailsMind.identify(user_id: 21, account_id: 7)
       Fiber.new { assert_empty RailsMind::Context.snapshot }.resume
       assert RailsMind.track("Invoice paid", amount_cents: 1000)
       assert_equal "21", @memory.events.last["user_id"]
       assert_equal "7", @memory.events.last["account_id"]
+      assert_equal "visitor-1", @memory.events.last["visitor_id"], "identify keeps a visitor it was not given"
       assert_equal 1000, @memory.events.last.dig("properties", "amount_cents")
       assert_raises(RuntimeError) do
         RailsMind.with_context(account_id: "other") { raise "failure" }

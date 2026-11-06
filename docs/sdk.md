@@ -129,7 +129,6 @@ a signed-in workspace member.
 ```ruby
 # ApplicationController: a before_action inside the SDK request boundary.
 RailsMind.identify(
-  visitor_id: ahoy.visitor_token,
   user_id: current_user&.id,
   account_id: current_account&.id
 )
@@ -141,7 +140,7 @@ RailsMind.track("Invoice paid", invoice_id: invoice.id, amount_cents: invoice.am
 RailsMind.capture_exception(error, handled: true)
 ```
 
-Context is fiber-local and restored around requests/jobs. `identify` replaces the three identity values, so call it with all available values; passing nil clears that value. Preserve Ahoy's visitor ID when a visitor logs in, and emit `$identify` through Ahoy authentication to connect later events. Account IDs represent the current tenant, never a guessed company from email. Logout/account switching must update identity; a new request starts clean. Historical anonymous events are not rewritten or merged across accounts by the SDK.
+Context is fiber-local and restored around requests/jobs. `identify` sets the user and account IDs, so call it with both; passing nil or leaving one out clears it. It keeps the visitor ID the request already carries (from the [visitor cookie](#page-views)) unless you pass `visitor_id:`: a value replaces it and `nil` clears it. `identify` sends nothing by itself. Page views and `RailsMind.track` events carry the visitor ID and, once `identify` has run, the user and account IDs; RailsMind links a visitor to a user from any event that carries both, so that visitor's earlier anonymous page views join the user. Account IDs represent the current tenant, never a guessed company from email. Logout/account switching must update identity; a new request starts clean. The SDK does not rewrite or merge historical events.
 
 ActiveJob serializes only the context identifier allowlist under `rails_mind_context`, then restores it while executing. Arguments are not inspected. This covers GoodJob through ActiveJob; direct Sidekiq jobs require a future explicit integration. Without OpenTelemetry, RailsMind creates a trace ID at a request, job, or mailer boundary and carries it across serialized ActiveJob context. An active OpenTelemetry span remains authoritative. Native IDs correlate observations; they do not invent a distributed parent/child span tree. Cross-service propagation belongs to the existing OpenTelemetry library; choose ActiveJob `propagation_style: :child` for a linked trace tree when configuring a new provider.
 

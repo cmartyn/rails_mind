@@ -1,6 +1,7 @@
 require "active_support/notifications"
 require "active_support/inflector"
 require "digest"
+require_relative "../visitor"
 
 module RailsMind
   module Integrations
@@ -44,7 +45,10 @@ module RailsMind
           Context.with_trace do
             previous = Thread.current[:rails_mind_queries]
             Thread.current[:rails_mind_queries] = { count: 0, fingerprints: Hash.new(0), shapes: {} }
-            @app.call(env)
+            Visitor.start(env)
+            response = @app.call(env)
+            Visitor.finish(env, response)
+            response
           rescue StandardError => error
             # Capture identity before this request boundary unwinds. Object
             # dedup still leaves other error reporters unaffected.
