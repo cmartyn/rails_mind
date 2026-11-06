@@ -128,9 +128,14 @@ module RailsMind
         values
       end
 
+      # Inside a mounted engine Rails gives the engine's own pattern, so the
+      # mount path (the request's script name) goes in front, as in the path.
       def route(request)
-        pattern = request.route_uri_pattern.to_s.delete_suffix("(.:format)") if request.respond_to?(:route_uri_pattern)
-        pattern[0, ROUTE_LIMIT] unless pattern.nil? || pattern.empty?
+        return unless request.respond_to?(:route_uri_pattern)
+        pattern = request.route_uri_pattern.to_s.delete_suffix("(.:format)")
+        return if pattern.empty?
+        pattern = "#{request.script_name}#{pattern}".chomp("/")
+        (pattern.empty? ? "/" : pattern)[0, ROUTE_LIMIT]
       rescue StandardError
         nil
       end

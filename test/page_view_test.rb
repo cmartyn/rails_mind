@@ -36,6 +36,10 @@ class PageViewTest < SDKTest
     def rendered = render(html: "<p>live</p>".html_safe)
   end
 
+  class MountedPostsController < ActionController::Base
+    def show = render(html: "<p>post</p>".html_safe)
+  end
+
   CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36".freeze
   VISITOR = "0b6f2f8e-1c2d-4e5f-9a0b-1c2d3e4f5a6b".freeze
   KEY = ("k" * 32).freeze
@@ -298,6 +302,27 @@ class PageViewTest < SDKTest
       visit(env: headers)
       actual = page_view.dig("properties", "country")
       country ? assert_equal(country, actual, headers.inspect) : assert_nil(actual, headers.inspect)
+    end
+  end
+
+  def test_a_mounted_engines_route_starts_with_its_mount_path
+    engine = ActionDispatch::Routing::RouteSet.new
+    engine.draw do
+      root to: "page_view_test/mounted_posts#show"
+      get "/posts/:id", to: "page_view_test/mounted_posts#show"
+    end
+    app = ActionDispatch::Routing::RouteSet.new
+    app.draw do
+      mount engine => "/blog"
+      root to: "page_view_test/mounted_posts#show"
+      get "/posts/:id", to: "page_view_test/mounted_posts#show"
+    end
+    { "/blog/posts/3" => "/blog/posts/:id", "/posts/3" => "/posts/:id", "/blog" => "/blog", "/" => "/" }.each do |path, route|
+      @memory.events.clear
+      _status, _headers, body = RailsMind::Integrations::RequestContext.new(app).call(request_env("https://shop.example#{path}", "action_dispatch.route_uri_pattern" => nil))
+      read(body)
+      assert_equal route, page_view.dig("properties", "route"), path
+      assert_equal path, page_view.dig("properties", "path") if path.include?("posts")
     end
   end
 

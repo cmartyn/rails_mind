@@ -168,7 +168,7 @@ request IDs of the request event for the same action. Its properties:
 
 | Property | What it holds |
 | --- | --- |
-| `route` | The route pattern, such as `/posts/:id`, without `(.:format)` |
+| `route` | The route pattern, such as `/posts/:id`, without `(.:format)`; a mounted engine's starts with its mount path |
 | `path` | The path and query string, with the app's `filter_parameters` applied (at most 1,000 characters) |
 | `host` | The request's host |
 | `referrer` | The referring URL's scheme, host and path; its query and fragment are not sent |
