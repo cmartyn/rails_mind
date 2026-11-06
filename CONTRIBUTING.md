@@ -1,19 +1,18 @@
 # Developing RailsMind
 
-This repository owns the MIT-licensed client SDK, browser adapter, tests, and SDK
-documentation. The hosted RailsMind application and its internal integration
-sample are maintained separately and remain proprietary.
+This repository owns the MIT-licensed client SDK, tests, and SDK documentation.
+The hosted RailsMind application and its internal integration sample are
+maintained separately and remain proprietary.
 
 ## Setup
 
-CI uses Ruby 4.0.6 and Node 22. Native workflow tests have also been run locally on Ruby 4.0.7; use the committed lockfile.
+CI uses Ruby 4.0.6. Native workflow tests have also been run locally on Ruby 4.0.7; use the committed lockfile.
 
 ```sh
 git clone https://github.com/cmartyn/rails_mind.git
 cd rails_mind
 bundle install
 bundle exec rake test
-node --test javascript/rails_mind.test.js
 bundle exec ruby script/package_smoke.rb
 ```
 
@@ -37,7 +36,7 @@ read this public repository.
 ## Packaging and releases
 
 `bundle exec ruby script/package_smoke.rb` builds a temporary gem and exercises its
-packaged installer, browser files, and native workflow integrations. `bundle exec rake build` writes the gem to
+packaged installer, page views, and native workflow integrations. `bundle exec rake build` writes the gem to
 `pkg/`. Neither command publishes anything.
 
 Publishing uses [RubyGems trusted publishing](https://guides.rubygems.org/trusted-publishing/)
@@ -70,7 +69,7 @@ git tag -a v0.2.0 -m "Release rails_mind 0.2.0"
 git push origin v0.2.0
 ```
 
-The workflow verifies the tag/version, reruns the Ruby, JavaScript, and package
+The workflow verifies the tag/version, reruns the Ruby and package
 checks, then publishes to RubyGems.org. Confirm the published version can be
 installed before announcing the release. Published version numbers cannot be
 reused; fixes need a new version.

@@ -66,7 +66,7 @@ module RailsMind
     def stable_id(value = nil)
       return SecureRandom.uuid unless value
       return value.to_s.downcase if value.to_s.match?(UUID)
-      # Deterministic UUID-shaped ID for existing Ahoy installations using ULIDs.
+      # Deterministic UUID-shaped ID for caller-supplied non-UUID IDs such as ULIDs.
       hex = Digest::SHA256.hexdigest("rails_mind:#{value}")[0, 32]
       hex[12] = "8"
       hex[16] = "8"

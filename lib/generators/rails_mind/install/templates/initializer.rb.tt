@@ -30,5 +30,5 @@ RailsMind.configure do |config|
   # config.ignore_page_view = ->(request) { request.path.start_with?("/admin") }
 end
 
-# No existing Ahoy store, Flipper adapter, or OpenTelemetry provider is changed.
+# No existing Flipper adapter or OpenTelemetry provider is changed.
 # Run `bin/rails rails_mind:doctor` and follow docs/sdk.md for opt-in integrations.

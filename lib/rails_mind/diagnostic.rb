@@ -29,13 +29,12 @@ module RailsMind
           "Add one initializer. No database migrations or Gemfile changes.",
           "Requests: automatic sampling of routine successes; jobs via Rails notifications and errors via Rails.error stay unsampled.",
           "Page views: HTML pages your controllers render are counted with a first-party visitor cookie; config.page_views, config.visitor_cookie and config.link_page_views_to_users turn parts off.",
-          detected["ahoy_matey"] ? "Ahoy detected: keep current store; explicitly opt into mirror mode after review." : "Analytics: optionally add ahoy_matey; choose hosted-only store or existing database store.",
+          ("Ahoy detected: RailsMind no longer reads Ahoy and counts page views itself. Remove any require \"rails_mind/integrations/ahoy\" and RailsMind::Integrations.mirror_ahoy! call, or the app fails at boot; Ahoy keeps its own tables." if detected["ahoy_matey"]),
           detected["opentelemetry-sdk"] ? "OpenTelemetry detected: attach RailsMind exporter after existing SDK setup; preserve sampler and exporters." : "APM traces: optionally add selected OpenTelemetry libraries and explicitly configure one provider.",
           detected["flipper"] ? "Flipper detected: observe notifications only; preserve adapter, groups, targeting and cache." : "Flags: Flipper is optional. No flag configuration is created.",
           "Existing error reporters stay installed. RailsMind deduplicates its own collector only.",
-          "Browser: optional Ahoy adapter; enable only after checking existing pageview handlers.",
           "Business/error signals are not sampled; routine requests follow the hosted policy. Local opt-out does not disable server sampling or quotas. Inspect RailsMind.stats for queue losses and unconfirmed delivery."
-        ],
+        ].compact,
         limitations: [ "Compatibility applies to tested versions only; this is not a historical import.",
           "No network check is performed and credential values are never printed." ]
       }

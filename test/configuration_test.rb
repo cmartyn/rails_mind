@@ -154,6 +154,35 @@ class ConfigurationTest < Minitest::Test
     end
   end
 
+  def test_doctor_tells_an_ahoy_app_what_to_remove
+    Dir.mktmpdir do |root|
+      config = RailsMind::Configuration.new(env: { "RAILS_MIND_KEY" => "test-only" }, root: root)
+      plan = RailsMind::Diagnostic.new(root: root, config: config).report[:plan]
+      refute plan.any? { |line| line.include?("Ahoy") }
+      refute plan.any? { |line| line.start_with?("Browser") }
+      File.write(File.join(root, "Gemfile.lock"), <<~LOCK)
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            ahoy_matey (5.5.0)
+
+        PLATFORMS
+          ruby
+
+        DEPENDENCIES
+          ahoy_matey
+
+        BUNDLED WITH
+           2.5.0
+      LOCK
+      report = RailsMind::Diagnostic.new(root: root, config: config).report
+      assert_equal "5.5.0", report[:detected]["ahoy_matey"]
+      hint = report[:plan].find { |line| line.start_with?("Ahoy detected") }
+      assert_includes hint, "rails_mind/integrations/ahoy"
+      assert_includes hint, "mirror_ahoy!"
+    end
+  end
+
   def test_doctor_reports_effective_configuration_without_exposing_the_key
     Dir.mktmpdir do |root|
       config = RailsMind::Configuration.new(env: { "RAILS_MIND_KEY" => "private-test-key", "RENDER_GIT_COMMIT" => "commit" }, root: root)

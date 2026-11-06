@@ -1,7 +1,7 @@
 # RailsMind SDK
 
 The MIT-licensed Ruby client for [RailsMind](https://railsmind.com). One bounded
-collector for Rails requests, errors, jobs, mailer attempts, Ahoy events, Flipper
+collector for Rails page views, requests, errors, jobs, mailer attempts, Flipper
 observations, and selected OpenTelemetry spans. Version 0.3.0 is an early release; see
 [compatibility and validation limits](docs/compatibility.md).
 
@@ -68,7 +68,6 @@ Tests:
 ```sh
 bundle install
 bundle exec rake test
-node --test javascript/rails_mind.test.js
 bundle exec ruby script/package_smoke.rb
 ruby script_benchmark.rb
 ```

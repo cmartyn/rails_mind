@@ -26,7 +26,7 @@ doctor names it and exits non-zero.
 bin/rails rails_mind:doctor
 ```
 
-The plan inspects `Gemfile.lock` and prints selected versions, coexistence decisions, and missing options. Installation adds one initializer, preserves an existing initializer even with `--force`, and does not change migrations, dependencies, Ahoy stores, Flipper adapters, or OpenTelemetry providers. The doctor is read-only and does not contact the server or print credentials.
+The plan inspects `Gemfile.lock` and prints selected versions, coexistence decisions, and missing options. Installation adds one initializer, preserves an existing initializer even with `--force`, and does not change migrations, dependencies, Flipper adapters, or OpenTelemetry providers. The doctor is read-only and does not contact the server or print credentials.
 
 ## Configuration and release detection
 
@@ -144,31 +144,6 @@ Context is fiber-local and restored around requests/jobs. `identify` sets the us
 
 ActiveJob serializes only the context identifier allowlist under `rails_mind_context`, then restores it while executing. Arguments are not inspected. This covers GoodJob through ActiveJob; direct Sidekiq jobs require a future explicit integration. Without OpenTelemetry, RailsMind creates a trace ID at a request, job, or mailer boundary and carries it across serialized ActiveJob context. An active OpenTelemetry span remains authoritative. Native IDs correlate observations; they do not invent a distributed parent/child span tree. Cross-service propagation belongs to the existing OpenTelemetry library; choose ActiveJob `propagation_style: :child` for a linked trace tree when configuring a new provider.
 
-## Ahoy
-
-Ahoy's documented store extension points preserve existing `ahoy.track` calls. Choose one mode explicitly. [Ahoy custom stores](https://github.com/ankane/ahoy#data-stores).
-
-For an established installation, keep the current `Ahoy::Store` definition, storage, ID generator, user method, and cookies, then add this after its configuration:
-
-```ruby
-require "rails_mind/integrations/ahoy"
-RailsMind::Integrations.mirror_ahoy!(Ahoy::Store)
-```
-
-The existing store runs first with its original hash. Its return value and exceptions survive. RailsMind then mirrors visits/events/authentication without modifying the data. Repeated installation does not add another wrapper. Existing event IDs remain stable on transport retries; non-UUID Ahoy IDs map deterministically into UUIDv8 values.
-
-For a new hosted-only installation:
-
-```ruby
-require "rails_mind/integrations/ahoy"
-Ahoy.api = true # Only when using the optional browser adapter.
-Ahoy.geocode = false
-class Ahoy::Store < RailsMind::Integrations::AhoyStore
-end
-```
-
-This store requires no growing analytics tables. It does not offer database-backed `Ahoy::Visit` objects, `visitable` associations, geocoding storage, historical import, or cookie-free persisted visit lookup. Applications using those behaviors should keep their current store and mirror. Disable an existing duplicate pageview handler only as a deliberate customer configuration change.
-
 ## Page views
 
 With `analytics` and `page_views` on (the default), the SDK counts a page view
@@ -248,6 +223,30 @@ RailsMind counts days in that zone.
 - Page views come on top of request events, so HTML traffic sends more events
   than before; both share the collector's queue and the daily quota.
 
+## Coming from Ahoy
+
+Version 0.4.0 removed the Ahoy integration (`AhoyStore`, `mirror_ahoy!`) and
+the Ahoy-based browser adapter. RailsMind counts [page views](#page-views)
+itself and no longer receives `$visit`, `$view`, `$pageview`, `$frame_view` or
+`$identify`. Before upgrading, delete `require "rails_mind/integrations/ahoy"`
+and `RailsMind::Integrations.mirror_ahoy!`; the require now fails at boot.
+
+- `ahoy.track("Invoice paid", ...)` becomes `RailsMind.track("Invoice paid", ...)`,
+  called after the outcome commits. Keep the `ahoy.track` call too if your own
+  Ahoy reports use it.
+- Ahoy's `authenticate(user)` becomes `RailsMind.identify(user_id:, account_id:)`.
+  Stop passing `visitor_id: ahoy.visitor_token`, so page views and events carry
+  the RailsMind visitor cookie.
+- A hosted-only `class Ahoy::Store < RailsMind::Integrations::AhoyStore` goes.
+  Remove `ahoy_matey` too, or define `class Ahoy::Store < Ahoy::BaseStore; end`,
+  because Ahoy needs an `Ahoy::Store`.
+- Delete the copied `app/javascript/rails_mind.js`, its importmap pin, any asset
+  path into the gem, and the `rails-mind-page` meta tag. Custom events sent from
+  the browser are no longer supported; record them on the server with
+  `RailsMind.track`.
+
+Ahoy itself keeps working for your own reports; RailsMind no longer reads it.
+
 ## OpenTelemetry
 
 Use selected tracing libraries, not `use_all`. The locally verified setup uses
@@ -286,8 +285,8 @@ uses the same selection rule, so the two samplers do not multiply probabilities.
 Only completed `request` events with status 200–399, a finite duration from zero
 to below 1,000 ms, and fewer than three repeated queries are eligible. Slow,
 failed, unknown-duration, and repeated-query requests remain unsampled, as do
-business events, page views, errors, jobs, mailer observations, visits, flags,
-checks, and OpenTelemetry spans. This preserves their sampling priority, not guaranteed
+business events, page views, errors, jobs, mailer observations, flags, checks,
+and OpenTelemetry spans. This preserves their sampling priority, not guaranteed
 delivery: queue bounds, payload limits, outages, and the server's hard daily quota
 still apply. Existing OpenTelemetry samplers remain authoritative; this feature
 does not promise complete distributed traces.
@@ -389,19 +388,9 @@ callbacks if later delivery facts are needed. Keep real product outcomes such
 as invitation acceptance separate, using explicit events after persistence.
 
 
-## Flipper and browser behavior
+## Flipper
 
 The SDK subscribes to `feature_operation.flipper`. It observes names, operations, boolean results, and duration without changing adapters, groups, actors, rollout logic, or cache. Flipper's existing Rails instrumentation emits these events; applications with a custom instrumenter must deliberately opt into ActiveSupport notifications. Actor IDs are not collected. An evaluation is not experiment exposure. Managed flags and experiments are not implemented in this SDK. [Flipper instrumentation](https://www.flippercloud.io/docs/instrumentation).
-
-Run `bin/rails generate rails_mind:install --browser` to copy the optional module. Importmap users pin it, then pass their existing Ahoy instance:
-
-```javascript
-import ahoy from "ahoy"
-import { start } from "rails_mind"
-const analytics = start({ ahoy, frames: true })
-```
-
-Add `<meta name="rails-mind-page" content="Invoices#index">` to supply a stable page label. The adapter transmits no URL or query string. It counts the initial page and each completed Turbo visit once, ignores cached preview renders, and keeps `turbo:frame-load` as a separate `$frame_view` only for Frames with `data-analytics-frame`. It does not infer payment/signup success from forms or HTTP responses. Set `pageviews: false` if the application already counts pageviews. Repeated installation returns the same adapter. Browser delivery uses Ahoy's same-origin endpoint/cookies and existing CSRF policy; there is no browser ingestion credential. [Turbo events](https://turbo.hotwired.dev/reference/events).
 
 ## Bounds, privacy, and outages
 
