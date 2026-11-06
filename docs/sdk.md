@@ -3,13 +3,13 @@
 The gem is `rails_mind`, namespace `RailsMind`. Install the MIT-licensed client
 from RubyGems.org and commit the application lockfile to retain the selected
 version. The hosted RailsMind service is a separate, proprietary application.
-Version 0.3.0 is an early release with the [documented compatibility limits](compatibility.md).
+Version 0.4.0 is an early release with the [documented compatibility limits](compatibility.md).
 
 ## Install
 
 ```ruby
 # Customer Gemfile
-gem "rails_mind", "~> 0.3.0"
+gem "rails_mind", "~> 0.4.0"
 ```
 
 ```sh

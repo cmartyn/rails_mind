@@ -111,3 +111,19 @@ fallback, idle zero-rate report refresh, streamed response bounds, batch byte
 limits, and real process fork resets. Fake transports verify the wire contract;
 deployed server policy behavior, cross-process traffic forecasts, and a
 customer app's production overhead require hosted/staging validation.
+
+## 0.4.0 page view verification
+
+The Ruby suite passes locally with Ruby 4.0.9 and the locked Rails 8.1.4 and
+Rack 3.2.7 libraries: 159 tests with no failures or skips. The packaged-gem
+smoke check also runs the page-view, visitor and transport tests against the
+built gem. Page views are tested by instrumenting `process_action.action_controller`
+with real `ActionDispatch::Request` and `ActionDispatch::Response` objects inside
+the SDK's request boundary: every counting rule, the properties and their caps,
+the redactor keeping every property key, the visitor cookie (set, refreshed,
+replaced, never on public responses), the daily hash, identity linking and the
+time-zone header.
+
+No Rails application is booted. Routing, `ActionDispatch::RemoteIp`, the cookie
+middleware and a CDN in front of a real app, Rails 7.2, and Rack 2.2 are not
+covered by these tests; check them in staging.
