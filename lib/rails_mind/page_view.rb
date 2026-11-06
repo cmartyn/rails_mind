@@ -57,6 +57,8 @@ module RailsMind
         client.emit(:pageview, "#{payload[:controller]}##{payload[:action]}", properties: properties, **attributes)
       end
 
+      private
+
       def counted?(payload, request, response, config)
         return false unless (payload[:method] || request.request_method) == "GET"
         return false unless (200..299).cover?(payload[:status].to_i)
@@ -69,8 +71,6 @@ module RailsMind
         return false if user_agent.strip.empty? || user_agent.match?(BOT)
         !ignored?(config, request)
       end
-
-      private
 
       # The cookie ID the request boundary put in context, unless the response
       # may be cached publicly and the visitor brought no cookie: a fresh ID

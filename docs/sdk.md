@@ -216,6 +216,11 @@ RailsMind counts days in that zone.
 
 - Turbo broadcast page refreshes (`broadcasts_refreshes`) reload a page the way
   a visit does, so each refresh counts as a page view in every open tab.
+- Turbo 8 prefetches a link on hover (`X-Sec-Purpose: prefetch`) and, when the
+  link is clicked, shows that prefetched response without asking the app again.
+  Prefetches are not counted, so a page opened that way is not counted either.
+  Add `<meta name="turbo-prefetch" content="false">` to the layout to count
+  those visits.
 - Pages served from a CDN or a browser cache never reach the app and are not
   counted. A `304 Not Modified` from `Rack::ConditionalGet` still counts.
 - Bot filtering is a built-in user-agent list. Add your own rules with

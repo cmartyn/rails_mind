@@ -18,7 +18,7 @@ Page views:
 - Link visitors to users: page views carry the user and account IDs `identify` set, and `identify` now keeps the request's visitor ID when `visitor_id:` is not passed (passing it still replaces it, and `nil` clears it). `identify` still sends nothing itself; RailsMind links a visitor to a user from any event carrying both. `config.link_page_views_to_users = false` keeps user and account IDs off page views.
 - Name the app's time zone (`config.time_zone` as an IANA name, `Etc/UTC` by default) in an `X-RailsMind-Time-Zone` header on every batch, so RailsMind counts days in it.
 - New switches, set in code and never read from the environment: `config.page_views`, `config.visitor_cookie`, `config.link_page_views_to_users` (each `true` by default and validated as a boolean) and `config.ignore_page_view`, a callable that receives the request and skips the page view when it returns true or raises. `rails_mind:doctor` reports the three switches.
-- Known limit: Turbo broadcast page refreshes reload a page the way a visit does, so each refresh counts as a page view in every open tab.
+- Known limits: Turbo broadcast page refreshes reload a page the way a visit does, so each refresh counts as a page view in every open tab. Turbo 8 shows a link's hover prefetch when it is clicked, without a new request; prefetches are not counted, so those visits are not either unless the layout turns prefetch off (`<meta name="turbo-prefetch" content="false">`).
 
 ## 0.3.2 — 2026-10-13
 
