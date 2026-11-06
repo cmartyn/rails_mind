@@ -363,6 +363,49 @@ class PageViewTest < SDKTest
     assert_equal "/files/[FILTERED]", page_view.dig("properties", "path"), "an escaped secret is masked too"
   end
 
+  def test_masking_follows_rails_filters_and_never_sends_an_unmasked_path
+    token = "abcdefgh1234"
+    secret_visit = ->(url, filters, params, extra = {}) do
+      @memory.events.clear
+      visit(url, env: { "action_dispatch.parameter_filter" => filters,
+        "action_dispatch.request.path_parameters" => { controller: "passwords", action: "edit" }.merge(params) }.merge(extra))
+      page_view["properties"]
+    end
+    string_key = [ ->(key, value) { value.replace("[FILTERED]") if key == "token" } ]
+    assert_equal "/passwords/[FILTERED]/edit", secret_visit.call("https://shop.example/passwords/#{token}/edit", string_key, { token: token })["path"],
+      "a lambda filter gets string keys, as Rails gives them"
+    raising = [ ->(key, _value) { raise "no" if key.include?("token") } ]
+    assert_equal "[FILTERED]", secret_visit.call("https://shop.example/passwords/#{token}/edit", raising, { token: token })["path"],
+      "a filter that raises sends no path, never the unmasked one"
+    assert_equal "/s/[FILTERED]", secret_visit.call("https://shop.example/s/ab12.html", [ :token ], { token: "ab12" })["path"], "a short secret with a format"
+    assert_equal "/p/[FILTERED]", secret_visit.call("https://shop.example/p/hello-123456", [ :otp ], { slug: "hello", otp: "123456" })["path"], "a secret sharing a segment"
+    assert_equal "/files/[FILTERED]", secret_visit.call("https://shop.example/files/ab/cd", [ :secret ], { secret: "ab/cd" })["path"], "a glob secret"
+    assert_equal "/passwords/[FILTERED]/edit?back=/passwords/[FILTERED]/edit",
+      secret_visit.call("https://shop.example/passwords/#{token}/edit?back=/passwords/#{token}/edit", [ :token ], { token: token })["path"],
+      "a long secret repeated in the query"
+
+    properties = secret_visit.call("https://shop.example/t/sekr3t-account-token/blog/posts/1", [ :token ], { account_token: "sekr3t-account-token", id: "1" },
+      { "SCRIPT_NAME" => "/t/sekr3t-account-token/blog", "PATH_INFO" => "/posts/1", "action_dispatch.route_uri_pattern" => "/posts/:id(.:format)" })
+    assert_equal "/t/[FILTERED]/blog/posts/:id", properties["route"], "a mounted engine's masked mount segment"
+    refute_includes JSON.generate(page_view), "sekr3t"
+
+    @memory.events.clear
+    env = request_env("https://shop.example/s/x", "action_dispatch.parameter_filter" => [ :token ],
+      "action_dispatch.request.path_parameters" => { controller: "shares", action: "show", token: "café-secret-token" })
+    env["PATH_INFO"] = "/s/café-secret-token".b
+    app = ->(inner) do
+      request = ActionDispatch::Request.new(inner)
+      payload = { controller: "SharesController", action: "show", request: request, method: "GET", path: request.filtered_path }
+      ActiveSupport::Notifications.instrument("process_action.action_controller", payload) do
+        payload[:status] = 200
+        payload[:response] = ActionDispatch::Response.new(200, HTML.dup)
+      end
+      [ 200, HTML.dup, [ "ok" ] ]
+    end
+    RailsMind::Integrations::RequestContext.new(app).call(env)
+    refute_includes page_view.dig("properties", "path").b, "secret-token".b, "a path in raw bytes is still masked"
+  end
+
   def test_a_link_inside_the_app_sends_only_its_origin_as_referrer
     { "https://shop.example/passwords/secret-token/edit?x=1" => "https://shop.example",
       "https://www.shop.example/posts/3" => "https://www.shop.example",

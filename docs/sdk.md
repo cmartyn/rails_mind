@@ -232,6 +232,10 @@ RailsMind counts days in that zone.
 
 ### Limits
 
+- A referrer counts as inside the app when its host matches the request's host
+  (ignoring a leading `www.`). Behind a proxy that rewrites `Host`, forward the
+  original host (`X-Forwarded-Host`) so Rails sees it; otherwise an internal
+  referrer is sent with its path.
 - Turbo broadcast page refreshes (`broadcasts_refreshes`) reload a page the way
   a visit does, so each refresh counts as a page view in every open tab.
 - Turbo 8 prefetches a link on hover (`X-Sec-Purpose: prefetch`) and, when the

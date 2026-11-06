@@ -26,8 +26,9 @@ module RailsMind
     # Hotwire Native app to recede, resume or refresh.
     FRAMEWORK_CONTROLLER = /\A(?:Rails|ActiveStorage|Turbo::Native)::/
     FILTERED = "[FILTERED]".freeze
-    # A path parameter shorter than this is masked only as a whole segment.
-    SUBSTRING_MASK_MIN = 8
+    # A masked value at least this long is also masked wherever it appears in
+    # the query string; a shorter one would mask unrelated values there.
+    QUERY_MASK_MIN = 8
     # Crawlers, link previews, LLM fetchers, monitors and bare HTTP clients. A
     # blank user agent is not counted either. "cloudfront" is what CloudFront
     # sends when a distribution does not forward the caller's user agent.
@@ -142,7 +143,10 @@ module RailsMind
         return unless request.respond_to?(:route_uri_pattern)
         pattern = request.route_uri_pattern.to_s.delete_suffix("(.:format)")
         return if pattern.empty?
-        pattern = "#{request.script_name}#{pattern}".chomp("/")
+        script = request.script_name.to_s
+        secrets = filtered_path_values(request)
+        script = mask(script, secrets) unless script.empty? || secrets.empty?
+        pattern = "#{script}#{pattern}".chomp("/")
         (pattern.empty? ? "/" : pattern)[0, ROUTE_LIMIT]
       rescue StandardError
         nil
@@ -151,34 +155,52 @@ module RailsMind
       # The query string goes through the app's filter_parameters, and so do
       # the route's own segments: a token in /passwords/:token/edit is masked
       # like one in ?token=.
+      # If masking fails, the path is not sent at all: never the unmasked one.
       def path(request)
         path = request.filtered_path.to_s
         secrets = filtered_path_values(request)
-        return path if secrets.empty?
-        route_part, query = path.split("?", 2)
-        segments = route_part.split("/", -1).map { |segment| secret_segment?(segment, secrets) ? FILTERED : segment }
-        masked = segments.join("/")
-        secrets.each { |secret| masked = masked.gsub(secret, FILTERED) if secret.length >= SUBSTRING_MASK_MIN }
-        query ? "#{masked}?#{query}" : masked
+        secrets.empty? ? path : mask(path, secrets)
       rescue StandardError
-        request.filtered_path.to_s
+        FILTERED
       end
 
-      # Each path parameter the app's filter masks, as written and as escaped.
+      # Each path parameter the app's filter masks, as written and as escaped,
+      # compared as bytes so a path in any encoding can be searched. Keys go to
+      # the filter as strings, as Rails' own filtered_parameters gives them.
       def filtered_path_values(request)
-        params = request.path_parameters.except(:controller, :action, :format)
+        params = request.path_parameters.except(:controller, :action, :format).transform_keys(&:to_s)
         return [] if params.empty?
         filtered = request.parameter_filter.filter(params)
         params.each_with_object([]) do |(key, value), secrets|
           next unless value.is_a?(String) && !value.empty? && filtered[key] != value
           secrets.push(value, Rack::Utils.escape_path(value), Rack::Utils.escape(value).gsub("+", "%20"))
-        end.uniq
+        end.map(&:b).uniq
       end
 
-      def secret_segment?(segment, secrets)
-        secrets.include?(segment) || secrets.include?(Rack::Utils.unescape_path(segment))
-      rescue StandardError
-        false
+      # Every route segment holding a secret goes whole (with any .format or
+      # text around it), a secret spanning segments (a glob route) goes, and a
+      # long secret repeated in the query goes too. Masking too much costs a
+      # little detail; masking too little sends a credential.
+      def mask(text, secrets)
+        return text if text.empty?
+        route_part, query = text.b.split("?", 2)
+        filtered = FILTERED.b
+        masked = route_part.split("/", -1).map { |segment| secret_in?(segment, secrets) ? filtered : segment }.join("/")
+        secrets.each { |secret| masked = masked.gsub(secret, filtered) if secret.include?("/") }
+        if query
+          secrets.each { |secret| query = query.gsub(secret, filtered) if secret.bytesize >= QUERY_MASK_MIN }
+          masked = "#{masked}?#{query}".b
+        end
+        masked.force_encoding(Encoding::UTF_8).scrub
+      end
+
+      def secret_in?(segment, secrets)
+        decoded = begin
+          Rack::Utils.unescape_path(segment).b
+        rescue StandardError
+          segment
+        end
+        secrets.any? { |secret| segment.include?(secret) || decoded.include?(secret) }
       end
 
       # Another site's scheme, host and path; its query and fragment stay home.

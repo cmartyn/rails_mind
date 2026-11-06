@@ -115,7 +115,7 @@ customer app's production overhead require hosted/staging validation.
 ## 0.4.0 and 0.4.1 page view verification
 
 The Ruby suite passes locally with Ruby 4.0.9 and the locked Rails 8.1.4 and
-Rack 3.2.7 libraries: 166 tests with no failures or skips at 0.4.1. The packaged-gem
+Rack 3.2.7 libraries: 167 tests with no failures or skips at 0.4.1. The packaged-gem
 smoke check also runs the page-view, visitor and transport tests against the
 built gem. Page views are tested by instrumenting `process_action.action_controller`
 with real `ActionDispatch::Request` and `ActionDispatch::Response` objects inside
