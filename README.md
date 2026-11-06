@@ -2,7 +2,7 @@
 
 The MIT-licensed Ruby client for [RailsMind](https://railsmind.com). One bounded
 collector for Rails page views, requests, errors, jobs, mailer attempts, Flipper
-observations, and selected OpenTelemetry spans. Version 0.4.0 is an early release; see
+observations, and selected OpenTelemetry spans. Version 0.4.1 is an early release; see
 [compatibility and validation limits](docs/compatibility.md).
 
 ```ruby

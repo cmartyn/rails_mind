@@ -100,6 +100,10 @@ class PageViewTest < SDKTest
       "health check" => -> { visit(controller: "Rails::HealthController", action: "show") },
       "Rails controller" => -> { visit(controller: "Rails::WelcomeController", action: "index") },
       "Active Storage" => -> { visit(controller: "ActiveStorage::Blobs::RedirectController", action: "show") },
+      "Hotwire Native recede stub" => -> { visit(controller: "Turbo::Native::NavigationController", action: "recede") },
+      "Accept */* (a poller or script)" => -> { visit(env: { "HTTP_ACCEPT" => "*/*" }) },
+      "Accept JSON" => -> { visit(env: { "HTTP_ACCEPT" => "application/json" }) },
+      "no Accept header" => -> { visit(env: { "HTTP_ACCEPT" => nil }) },
       "Googlebot" => -> { visit(env: { "HTTP_USER_AGENT" => "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)" }) },
       "GPTBot" => -> { visit(env: { "HTTP_USER_AGENT" => "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2)" }) },
       "curl" => -> { visit(env: { "HTTP_USER_AGENT" => "curl/8.7.1" }) },
@@ -330,6 +334,96 @@ class PageViewTest < SDKTest
     visit("https://shop.example/reset?password=hunter2&utm_source=mail", env: { "action_dispatch.parameter_filter" => [ :password ] })
     assert_equal "/reset?password=[FILTERED]&utm_source=mail", page_view.dig("properties", "path")
     refute_includes JSON.generate(@memory.events), "hunter2"
+  end
+
+  def test_route_segments_the_apps_filter_parameters_mask_are_masked_in_the_path
+    token = "eyJfcmFpbHMiOnsiZGF0YSI6WzFdfX0=--0123456789abcdef0123"
+    visit("https://shop.example/passwords/#{token}/edit?token=#{token}&page=2", env: {
+      "action_dispatch.parameter_filter" => [ :token ],
+      "action_dispatch.route_uri_pattern" => "/passwords/:token/edit(.:format)",
+      "action_dispatch.request.path_parameters" => { controller: "passwords", action: "edit", token: token }
+    })
+    properties = page_view["properties"]
+    assert_equal "/passwords/[FILTERED]/edit?token=[FILTERED]&page=2", properties["path"]
+    assert_equal "/passwords/:token/edit", properties["route"]
+    refute_includes JSON.generate(page_view), "0123456789abcdef0123"
+
+    @memory.events.clear
+    visit("https://shop.example/s/ab12/posts/7", env: {
+      "action_dispatch.parameter_filter" => [ :token ],
+      "action_dispatch.request.path_parameters" => { controller: "shares", action: "show", share_token: "ab12", id: "7" }
+    })
+    assert_equal "/s/[FILTERED]/posts/7", page_view.dig("properties", "path"), "a short secret goes as a whole segment; other parameters stay"
+
+    @memory.events.clear
+    visit("https://shop.example/files/a%2Fb%20c", env: {
+      "action_dispatch.parameter_filter" => [ :secret ],
+      "action_dispatch.request.path_parameters" => { controller: "files", action: "show", secret: "a/b c" }
+    })
+    assert_equal "/files/[FILTERED]", page_view.dig("properties", "path"), "an escaped secret is masked too"
+  end
+
+  def test_masking_follows_rails_filters_and_never_sends_an_unmasked_path
+    token = "abcdefgh1234"
+    secret_visit = ->(url, filters, params, extra = {}) do
+      @memory.events.clear
+      visit(url, env: { "action_dispatch.parameter_filter" => filters,
+        "action_dispatch.request.path_parameters" => { controller: "passwords", action: "edit" }.merge(params) }.merge(extra))
+      page_view["properties"]
+    end
+    string_key = [ ->(key, value) { value.replace("[FILTERED]") if key == "token" } ]
+    assert_equal "/passwords/[FILTERED]/edit", secret_visit.call("https://shop.example/passwords/#{token}/edit", string_key, { token: token })["path"],
+      "a lambda filter gets string keys, as Rails gives them"
+    raising = [ ->(key, _value) { raise "no" if key.include?("token") } ]
+    assert_equal "[FILTERED]", secret_visit.call("https://shop.example/passwords/#{token}/edit", raising, { token: token })["path"],
+      "a filter that raises sends no path, never the unmasked one"
+    assert_equal "/s/[FILTERED]", secret_visit.call("https://shop.example/s/ab12.html", [ :token ], { token: "ab12" })["path"], "a short secret with a format"
+    assert_equal "/p/[FILTERED]", secret_visit.call("https://shop.example/p/hello-123456", [ :otp ], { slug: "hello", otp: "123456" })["path"], "a secret sharing a segment"
+    assert_equal "/files/[FILTERED]", secret_visit.call("https://shop.example/files/ab/cd", [ :secret ], { secret: "ab/cd" })["path"], "a glob secret"
+    assert_equal "/passwords/[FILTERED]/edit?back=/passwords/[FILTERED]/edit",
+      secret_visit.call("https://shop.example/passwords/#{token}/edit?back=/passwords/#{token}/edit", [ :token ], { token: token })["path"],
+      "a long secret repeated in the query"
+
+    assert_equal "/files/[FILTERED]/[FILTERED]", secret_visit.call("https://shop.example/files/q%5B1%5D/x9", [ :secret ], { secret: "q[1]/x9" })["path"],
+      "a glob secret the URL helper escaped"
+    refute_includes secret_visit.call("https://shop.example/share/abc/abc/hidden", [ :token, :secret ], { share_token: "abc", secret_path: "abc/hidden" })["path"],
+      "hidden", "a glob secret another secret overlaps"
+    assert_equal "/s/[FILTERED]?back=[FILTERED]&page=2", secret_visit.call("https://shop.example/s/ab12?back=%2Fs%2Fab12&page=2", [ :token ], { token: "ab12" })["path"],
+      "a short secret in a back link"
+    tagged = secret_visit.call("https://shop.example/s/#{token}?utm_content=#{token}&utm_source=mail", [ :token ], { token: token })
+    refute tagged.key?("utm_content"), "a campaign tag holding a masked route value is not sent"
+    assert_equal "mail", tagged["utm_source"]
+
+    properties = secret_visit.call("https://shop.example/t/sekr3t-account-token/blog/posts/1", [ :token ], { account_token: "sekr3t-account-token", id: "1" },
+      { "SCRIPT_NAME" => "/t/sekr3t-account-token/blog", "PATH_INFO" => "/posts/1", "action_dispatch.route_uri_pattern" => "/posts/:id(.:format)" })
+    assert_equal "/t/[FILTERED]/blog/posts/:id", properties["route"], "a mounted engine's masked mount segment"
+    refute_includes JSON.generate(page_view), "sekr3t"
+
+    @memory.events.clear
+    env = request_env("https://shop.example/s/x", "action_dispatch.parameter_filter" => [ :token ],
+      "action_dispatch.request.path_parameters" => { controller: "shares", action: "show", token: "café-secret-token" })
+    env["PATH_INFO"] = "/s/café-secret-token".b
+    app = ->(inner) do
+      request = ActionDispatch::Request.new(inner)
+      payload = { controller: "SharesController", action: "show", request: request, method: "GET", path: request.filtered_path }
+      ActiveSupport::Notifications.instrument("process_action.action_controller", payload) do
+        payload[:status] = 200
+        payload[:response] = ActionDispatch::Response.new(200, HTML.dup)
+      end
+      [ 200, HTML.dup, [ "ok" ] ]
+    end
+    RailsMind::Integrations::RequestContext.new(app).call(env)
+    refute_includes page_view.dig("properties", "path").b, "secret-token".b, "a path in raw bytes is still masked"
+  end
+
+  def test_a_link_inside_the_app_sends_only_its_origin_as_referrer
+    { "https://shop.example/passwords/secret-token/edit?x=1" => "https://shop.example",
+      "https://www.shop.example/posts/3" => "https://www.shop.example",
+      "https://news.example/item/42?id=9" => "https://news.example/item/42" }.each do |referrer, sent|
+      @memory.events.clear
+      visit("https://shop.example/posts/7", env: { "HTTP_REFERER" => referrer })
+      assert_equal sent, page_view.dig("properties", "referrer"), referrer
+    end
   end
 
   def test_a_tag_the_apps_filter_parameters_mask_is_not_sent
