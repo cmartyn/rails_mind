@@ -4,7 +4,7 @@ require "digest"
 
 module RailsMind
   class Client
-    KINDS = %w[request span error event visit flag job check].freeze
+    KINDS = %w[request span error event visit pageview flag job check].freeze
     FIELDS = %i[id kind occurred_at name duration_ms status release trace_id span_id parent_span_id request_id job_id visitor_id user_id account_id properties].freeze
     UUID = /\A[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/i
     attr_reader :config, :collector
@@ -66,7 +66,7 @@ module RailsMind
     def stable_id(value = nil)
       return SecureRandom.uuid unless value
       return value.to_s.downcase if value.to_s.match?(UUID)
-      # Deterministic UUID-shaped ID for existing Ahoy installations using ULIDs.
+      # Deterministic UUID-shaped ID for caller-supplied non-UUID IDs such as ULIDs.
       hex = Digest::SHA256.hexdigest("rails_mind:#{value}")[0, 32]
       hex[12] = "8"
       hex[16] = "8"
@@ -97,6 +97,7 @@ module RailsMind
       when "request", "span", "job" then config.apm
       when "error" then config.errors
       when "event", "visit" then config.analytics
+      when "pageview" then config.analytics && config.page_views
       when "flag" then config.flags
       else false
       end

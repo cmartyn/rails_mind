@@ -3,11 +3,12 @@ require_relative "test_helper"
 class ClientTest < SDKTest
   def test_identity_restores_across_request_boundaries_and_is_fiber_local
     RailsMind.with_context(request_id: "request-1", visitor_id: "visitor-1") do
-      RailsMind.identify(user_id: 21, account_id: 7, visitor_id: "visitor-1")
+      RailsMind.identify(user_id: 21, account_id: 7)
       Fiber.new { assert_empty RailsMind::Context.snapshot }.resume
       assert RailsMind.track("Invoice paid", amount_cents: 1000)
       assert_equal "21", @memory.events.last["user_id"]
       assert_equal "7", @memory.events.last["account_id"]
+      assert_equal "visitor-1", @memory.events.last["visitor_id"], "identify keeps a visitor it was not given"
       assert_equal 1000, @memory.events.last.dig("properties", "amount_cents")
       assert_raises(RuntimeError) do
         RailsMind.with_context(account_id: "other") { raise "failure" }
@@ -44,6 +45,17 @@ class ClientTest < SDKTest
     assert @client.emit(:error, "RuntimeError")
     @config.analytics = false
     refute @client.emit(:event, "Paid")
+  end
+
+  def test_page_views_need_both_analytics_and_page_views
+    assert @client.emit(:pageview, "PostsController#show")
+    assert_equal "pageview", @memory.events.last["kind"]
+    @config.page_views = false
+    refute @client.emit(:pageview, "PostsController#show")
+    @config.page_views = true
+    @config.analytics = false
+    refute @client.emit(:pageview, "PostsController#show")
+    assert_equal 1, @memory.events.size
   end
 
   def test_exception_messages_scrubbed_by_default_omitted_on_opt_out_and_same_object_deduplicated

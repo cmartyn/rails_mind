@@ -3,13 +3,13 @@
 The gem is `rails_mind`, namespace `RailsMind`. Install the MIT-licensed client
 from RubyGems.org and commit the application lockfile to retain the selected
 version. The hosted RailsMind service is a separate, proprietary application.
-Version 0.3.0 is an early release with the [documented compatibility limits](compatibility.md).
+Version 0.4.0 is an early release with the [documented compatibility limits](compatibility.md).
 
 ## Install
 
 ```ruby
 # Customer Gemfile
-gem "rails_mind", "~> 0.3.0"
+gem "rails_mind", "~> 0.4.0"
 ```
 
 ```sh
@@ -26,7 +26,7 @@ doctor names it and exits non-zero.
 bin/rails rails_mind:doctor
 ```
 
-The plan inspects `Gemfile.lock` and prints selected versions, coexistence decisions, and missing options. Installation adds one initializer, preserves an existing initializer even with `--force`, and does not change migrations, dependencies, Ahoy stores, Flipper adapters, or OpenTelemetry providers. The doctor is read-only and does not contact the server or print credentials.
+The plan inspects `Gemfile.lock` and prints selected versions, coexistence decisions, and missing options. Installation adds one initializer, preserves an existing initializer even with `--force`, and does not change migrations, dependencies, Flipper adapters, or OpenTelemetry providers. The doctor is read-only and does not contact the server or print credentials.
 
 ## Configuration and release detection
 
@@ -42,7 +42,10 @@ RailsMind instance, set `RAILS_MIND_ENDPOINT` (for example,
 default. HTTPS is required except for localhost/loopback development. The key
 controls application/environment scope; never give it to browser JavaScript.
 Collection stays off without a nonblank key. `apm`, `errors`, `analytics`, and
-`flags` can each be disabled in the initializer.
+`flags` can each be disabled in the initializer. [Page views](#page-views) have
+their own switches: `page_views`, `visitor_cookie` and `link_page_views_to_users`
+(each `true` or `false`, on by default) and `ignore_page_view` (a callable that
+receives the request). Switches are set in code, never read from the environment.
 
 Release detection uses the first nonblank value in this order:
 
@@ -126,7 +129,6 @@ a signed-in workspace member.
 ```ruby
 # ApplicationController: a before_action inside the SDK request boundary.
 RailsMind.identify(
-  visitor_id: ahoy.visitor_token,
   user_id: current_user&.id,
   account_id: current_account&.id
 )
@@ -138,34 +140,135 @@ RailsMind.track("Invoice paid", invoice_id: invoice.id, amount_cents: invoice.am
 RailsMind.capture_exception(error, handled: true)
 ```
 
-Context is fiber-local and restored around requests/jobs. `identify` replaces the three identity values, so call it with all available values; passing nil clears that value. Preserve Ahoy's visitor ID when a visitor logs in, and emit `$identify` through Ahoy authentication to connect later events. Account IDs represent the current tenant, never a guessed company from email. Logout/account switching must update identity; a new request starts clean. Historical anonymous events are not rewritten or merged across accounts by the SDK.
+Context is fiber-local and restored around requests/jobs. `identify` sets the user and account IDs, so call it with both; passing nil or leaving one out clears it. It keeps the visitor ID the request already carries (from the [visitor cookie](#page-views)) unless you pass `visitor_id:`: a value replaces it and `nil` clears it. `identify` sends nothing by itself. Page views and `RailsMind.track` events carry the visitor ID and, once `identify` has run, the user and account IDs; RailsMind links a visitor to a user from any event that carries both, so that visitor's earlier anonymous page views join the user. Account IDs represent the current tenant, never a guessed company from email. Logout/account switching must update identity; a new request starts clean. The SDK does not rewrite or merge historical events.
 
 ActiveJob serializes only the context identifier allowlist under `rails_mind_context`, then restores it while executing. Arguments are not inspected. This covers GoodJob through ActiveJob; direct Sidekiq jobs require a future explicit integration. Without OpenTelemetry, RailsMind creates a trace ID at a request, job, or mailer boundary and carries it across serialized ActiveJob context. An active OpenTelemetry span remains authoritative. Native IDs correlate observations; they do not invent a distributed parent/child span tree. Cross-service propagation belongs to the existing OpenTelemetry library; choose ActiveJob `propagation_style: :child` for a linked trace tree when configuring a new provider.
 
-## Ahoy
+## Page views
 
-Ahoy's documented store extension points preserve existing `ahoy.track` calls. Choose one mode explicitly. [Ahoy custom stores](https://github.com/ankane/ahoy#data-stores).
+With `analytics` and `page_views` on (the default), the SDK counts a page view
+for each HTML page a controller renders for a person: a GET answered with a 2xx
+`text/html` response. These are not counted:
 
-For an established installation, keep the current `Ahoy::Store` definition, storage, ID generator, user method, and cookies, then add this after its configuration:
+- Turbo Frame requests, prefetches (`Sec-Purpose` or `X-Sec-Purpose: prefetch`)
+  and XHRs;
+- `Rails::` controllers (the `/up` health check included) and `ActiveStorage::`
+  controllers;
+- a blank or known-bot user agent (crawlers, link previews, LLM fetchers, uptime
+  monitors and bare HTTP clients);
+- anything your `ignore_page_view` hook returns true for. It receives the
+  request; a hook that raises skips that page view.
 
 ```ruby
-require "rails_mind/integrations/ahoy"
-RailsMind::Integrations.mirror_ahoy!(Ahoy::Store)
+config.ignore_page_view = ->(request) { request.path.start_with?("/admin") }
 ```
 
-The existing store runs first with its original hash. Its return value and exceptions survive. RailsMind then mirrors visits/events/authentication without modifying the data. Repeated installation does not add another wrapper. Existing event IDs remain stable on transport retries; non-UUID Ahoy IDs map deterministically into UUIDv8 values.
+A page view is a `pageview` event named `Controller#action`, with the trace and
+request IDs of the request event for the same action. Its properties:
 
-For a new hosted-only installation:
+| Property | What it holds |
+| --- | --- |
+| `route` | The route pattern, such as `/posts/:id`, without `(.:format)`; a mounted engine's starts with its mount path |
+| `path` | The path and query string, with the app's `filter_parameters` applied (at most 1,000 characters) |
+| `host` | The request's host |
+| `referrer` | The referring URL's scheme, host and path; its query and fragment are not sent |
+| `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `ref` | Those query parameters, at most 200 characters each; one your `filter_parameters` masks is not sent |
+| `user_agent` | The user agent, at most 500 characters; RailsMind derives device, browser and OS from it |
+| `country` | Two letters from `CF-IPCountry` or `CloudFront-Viewer-Country`, when present |
+| `visitor_id_kind` | `cookie` or `daily_hash` (below) |
 
-```ruby
-require "rails_mind/integrations/ahoy"
-Ahoy.api = true # Only when using the optional browser adapter.
-Ahoy.geocode = false
-class Ahoy::Store < RailsMind::Integrations::AhoyStore
-end
-```
+The page view also carries the visitor ID and, once `identify` has run, the
+user and account IDs. Set `config.link_page_views_to_users = false` to keep user
+and account IDs off page views. Other events still carry them, and RailsMind
+also links a visitor to a user from a `RailsMind.track` event that carries both
+IDs, such as one sent after `identify`, so the switch does not stop that link.
+Request, job and error events never link a visitor.
+The IP address is never sent. Every string goes through the same redaction as
+other events. Page views are never sampled and count against the environment's
+daily quota.
 
-This store requires no growing analytics tables. It does not offer database-backed `Ahoy::Visit` objects, `visitable` associations, geocoding storage, historical import, or cookie-free persisted visit lookup. Applications using those behaviors should keep their current store and mirror. Disable an existing duplicate pageview handler only as a deliberate customer configuration change.
+### Visitor cookie
+
+By default the SDK keeps a random visitor ID in a first-party cookie named
+`_rails_mind_visitor`: a UUID, `path=/`, two years, `HttpOnly`, `SameSite=Lax`,
+and `Secure` over HTTPS. Each counted page view sets or refreshes it, and a new
+visitor's first page view already carries the ID that response sets. Every event
+of the request, `RailsMind.track` calls and jobs enqueued there included, carries
+the same ID, so an anonymous visit can lead to an outcome. A request that cannot
+become a page view (a POST, a JSON or API GET, a Turbo Frame, an XHR or a
+prefetch) gets no new ID; it carries the cookie's ID when the visitor has one.
+A cookie value that is not a UUID the SDK could have made is replaced.
+
+Upgrading to 0.4.0 starts setting this cookie by default. If your privacy notice
+or cookie consent lists the cookies your app sets, update it before you deploy,
+or set `config.visitor_cookie = false` (below) or `config.page_views = false`.
+
+A response marked `Cache-Control: public` never gets the cookie, so shared caches
+keep working. Neither does a response from an `ActionController::Live`
+controller, which sends its headers before the action ends. Their page views use
+the visitor's cookie when they brought one, and otherwise the daily hash. For a
+visitor without the cookie, the request's other events (the request event,
+`RailsMind.track` calls and jobs enqueued there) then carry a fresh ID that is
+never stored, so they are not tied to that page view.
+
+With `config.visitor_cookie = false`, no cookie is read or set. Page views, and
+the other events of the same request, carry a daily hash instead: an HMAC of the
+local date, the remote IP and the user agent, keyed from the app's
+`secret_key_base` (never the ingest key) and cut to 32 hex characters. It changes
+every day in the app's time zone, so a person who comes back the next day counts
+as a new visitor. Without `secret_key_base` or a remote IP, page views carry no
+visitor ID. Behind a proxy, set `config.action_dispatch.trusted_proxies` so
+`request.remote_ip` is the visitor's address.
+
+### Time zone
+
+Every batch names the app's time zone (`config.time_zone` as an IANA name, so
+Rails' default `UTC` is `Etc/UTC`) in the `X-RailsMind-Time-Zone` header, and
+RailsMind counts days in that zone.
+
+### Limits
+
+- Turbo broadcast page refreshes (`broadcasts_refreshes`) reload a page the way
+  a visit does, so each refresh counts as a page view in every open tab.
+- Turbo 8 prefetches a link on hover (`X-Sec-Purpose: prefetch`) and, when the
+  link is clicked, shows that prefetched response without asking the app again.
+  Prefetches are not counted, so a page opened that way is not counted either.
+  Add `<meta name="turbo-prefetch" content="false">` to the layout to count
+  those visits.
+- Pages served from a CDN or a browser cache never reach the app and are not
+  counted. A `304 Not Modified` from `Rack::ConditionalGet` still counts; one
+  the controller sends through `fresh_when` or `stale?` does not, because the
+  action rendered no page.
+- Bot filtering is a built-in user-agent list. Add your own rules with
+  `ignore_page_view`.
+- Page views come on top of request events, so HTML traffic sends more events
+  than before; both share the collector's queue and the daily quota.
+
+## Coming from Ahoy
+
+Version 0.4.0 removed the Ahoy integration (`AhoyStore`, `mirror_ahoy!`) and
+the Ahoy-based browser adapter. RailsMind counts [page views](#page-views)
+itself and no longer receives `$visit`, `$view`, `$pageview`, `$frame_view` or
+`$identify`. Before upgrading, delete `require "rails_mind/integrations/ahoy"`
+and `RailsMind::Integrations.mirror_ahoy!`; the require now fails at boot.
+
+- `ahoy.track("Invoice paid", ...)` becomes `RailsMind.track("Invoice paid", ...)`,
+  called after the outcome commits. Keep the `ahoy.track` call too if your own
+  Ahoy reports use it.
+- Ahoy's `authenticate(user)` becomes `RailsMind.identify(user_id:, account_id:)`.
+  Stop passing `visitor_id: ahoy.visitor_token`, so page views and events carry
+  the RailsMind visitor cookie.
+- A hosted-only `class Ahoy::Store < RailsMind::Integrations::AhoyStore` goes.
+  Remove `ahoy_matey` too, or define `class Ahoy::Store < Ahoy::BaseStore; end`,
+  because Ahoy needs an `Ahoy::Store`.
+- Delete the copied `app/javascript/rails_mind.js`, its importmap pin, the
+  `import { start } from "rails_mind"` line and the `start(...)` call in your
+  JavaScript entry point, any asset path into the gem, and the `rails-mind-page`
+  meta tag. An import left without its pin stops the whole entry point from
+  loading. Custom events sent from the browser are no longer supported; record
+  them on the server with `RailsMind.track`.
+
+Ahoy itself keeps working for your own reports; RailsMind no longer reads it.
 
 ## OpenTelemetry
 
@@ -205,8 +308,8 @@ uses the same selection rule, so the two samplers do not multiply probabilities.
 Only completed `request` events with status 200–399, a finite duration from zero
 to below 1,000 ms, and fewer than three repeated queries are eligible. Slow,
 failed, unknown-duration, and repeated-query requests remain unsampled, as do
-business events, errors, jobs, mailer observations, visits, flags, checks, and
-OpenTelemetry spans. This preserves their sampling priority, not guaranteed
+business events, page views, errors, jobs, mailer observations, flags, checks,
+and OpenTelemetry spans. This preserves their sampling priority, not guaranteed
 delivery: queue bounds, payload limits, outages, and the server's hard daily quota
 still apply. Existing OpenTelemetry samplers remain authoritative; this feature
 does not promise complete distributed traces.
@@ -308,19 +411,9 @@ callbacks if later delivery facts are needed. Keep real product outcomes such
 as invitation acceptance separate, using explicit events after persistence.
 
 
-## Flipper and browser behavior
+## Flipper
 
 The SDK subscribes to `feature_operation.flipper`. It observes names, operations, boolean results, and duration without changing adapters, groups, actors, rollout logic, or cache. Flipper's existing Rails instrumentation emits these events; applications with a custom instrumenter must deliberately opt into ActiveSupport notifications. Actor IDs are not collected. An evaluation is not experiment exposure. Managed flags and experiments are not implemented in this SDK. [Flipper instrumentation](https://www.flippercloud.io/docs/instrumentation).
-
-Run `bin/rails generate rails_mind:install --browser` to copy the optional module. Importmap users pin it, then pass their existing Ahoy instance:
-
-```javascript
-import ahoy from "ahoy"
-import { start } from "rails_mind"
-const analytics = start({ ahoy, frames: true })
-```
-
-Add `<meta name="rails-mind-page" content="Invoices#index">` to supply a stable page label. The adapter transmits no URL or query string. It counts the initial page and each completed Turbo visit once, ignores cached preview renders, and keeps `turbo:frame-load` as a separate `$frame_view` only for Frames with `data-analytics-frame`. It does not infer payment/signup success from forms or HTTP responses. Set `pageviews: false` if the application already counts pageviews. Repeated installation returns the same adapter. Browser delivery uses Ahoy's same-origin endpoint/cookies and existing CSRF policy; there is no browser ingestion credential. [Turbo events](https://turbo.hotwired.dev/reference/events).
 
 ## Bounds, privacy, and outages
 
@@ -337,7 +430,7 @@ RailsMind.flush(timeout: 2)
 
 These are per-process counters. `dropped` counts known local discards, such as queue overflow or oversize payloads. `delivery_unconfirmed` counts events whose delivery attempts ended without a success response, including interrupted in-flight batches; some may have been accepted by the server. `delivered` counts submitted events in batches with a successful HTTP response; it does not prove server retention or background processing. The doctor prints stats for its process; inspect running app stats through your existing operational tooling. Only the routine-request report above sends queue-loss observations to the hosted app. All signal kinds can still undercount after crashes, rejected payloads, hooks, or outages. This is best-effort monitoring, not an accounting ledger; use a transactional outbox when durable business-event delivery is required.
 
-Redaction occurs before buffering and again after custom `before_send`. Sensitive property names are filtered, nesting/string/collection sizes are capped, emails and common credential forms are scrubbed (exception messages included), and backtraces drop machine-home prefixes while keeping a `gems/<name>-<version>/` or `ruby/<version>/` origin for library frames. Error events also name where they happened: `role`, plus the controller action as `route` or the job's `job_class` and `queue`. Bodies, cookies, credentials, SQL binds, and job arguments are never selected by integrations. Arbitrary user-provided text may contain sensitive content that generic redaction cannot recognize: use small, explicitly reviewed business properties. Exception messages can contain whatever your code interpolated into them; review your scrubbing policy, or set `config.capture_exception_message = false` to replace every message with a placeholder before it leaves.
+Redaction occurs before buffering and again after custom `before_send`. Sensitive property names are filtered, nesting/string/collection sizes are capped, emails and common credential forms are scrubbed (exception messages included), and backtraces drop machine-home prefixes while keeping a `gems/<name>-<version>/` or `ruby/<version>/` origin for library frames. Error events also name where they happened: `role`, plus the controller action as `route` or the job's `job_class` and `queue`. Bodies, cookies (other than the SDK's own visitor cookie), credentials, SQL binds, and job arguments are never selected by integrations. Arbitrary user-provided text may contain sensitive content that generic redaction cannot recognize: use small, explicitly reviewed business properties. Exception messages can contain whatever your code interpolated into them; review your scrubbing policy, or set `config.capture_exception_message = false` to replace every message with a placeholder before it leaves.
 
 The final local synthetic burst benchmark on Ruby 4.0.6 processed 10,000 calls in 1.7612 seconds (176.12 μs/call), delivering all 10,000 with zero drops/retries at the 1,000-event queue bound. This measures local sanitization/enqueue with a no-op transport, not production request overhead or network delivery. Earlier runs did overflow; thread scheduling and downstream speed affect the result. Deterministic tests separately verify overflow losses and bounded shutdown during a hung transport. Run `ruby script_benchmark.rb` on the deployment hardware before setting a production budget.
 

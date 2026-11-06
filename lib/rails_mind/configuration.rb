@@ -9,7 +9,8 @@ module RailsMind
     attr_accessor :endpoint, :token, :release, :apm, :errors, :analytics, :flags,
       :queue_capacity, :batch_size, :max_batch_bytes, :max_event_bytes, :flush_interval,
       :max_retries, :retry_base, :open_timeout, :read_timeout, :shutdown_timeout,
-      :before_send, :capture_exception_message, :capture_query_shapes, :automatic_sampling
+      :before_send, :capture_exception_message, :capture_query_shapes, :automatic_sampling,
+      :page_views, :visitor_cookie, :link_page_views_to_users, :ignore_page_view
 
     def initialize(env: ENV, root: nil)
       @endpoint = nonblank(env["RAILS_MIND_ENDPOINT"]) || DEFAULT_ENDPOINT
@@ -29,6 +30,10 @@ module RailsMind
       @capture_exception_message = true
       @capture_query_shapes = true
       @automatic_sampling = true
+      @page_views = true
+      @visitor_cookie = true
+      @link_page_views_to_users = true
+      @ignore_page_view = nil
     end
 
     def enabled? = !token.to_s.strip.empty? && !endpoint.to_s.strip.empty?
@@ -37,10 +42,11 @@ module RailsMind
       return self unless enabled?
       # capture_exception_message stays unvalidated as in 0.3.0, so an app that
       # assigned it from ENV still boots after upgrading.
-      %i[automatic_sampling capture_query_shapes].each do |flag|
+      %i[automatic_sampling capture_query_shapes page_views visitor_cookie link_page_views_to_users].each do |flag|
         value = public_send(flag)
         raise ArgumentError, "#{flag} must be true or false" unless value == true || value == false
       end
+      raise ArgumentError, "ignore_page_view must respond to call" unless ignore_page_view.nil? || ignore_page_view.respond_to?(:call)
       uri = URI(endpoint)
       loopback = %w[localhost 127.0.0.1 ::1].include?(uri.hostname)
       raise ArgumentError, "endpoint must use HTTPS (HTTP only on loopback)" unless uri.is_a?(URI::HTTPS) || (uri.is_a?(URI::HTTP) && loopback)

@@ -28,4 +28,27 @@ class TransportTest < SDKTest
     assert RailsMind::Transport.new(@config, http_factory: ->(_uri) { HTTP.new(:timeout) }).send_batch("{}").retryable
     refute RailsMind::Context.suppressed?
   end
+
+  def test_batches_name_the_apps_time_zone_and_version
+    { "America/New_York" => "America/New_York", "Eastern Time (US & Canada)" => "America/New_York", "UTC" => "Etc/UTC" }.each do |zone, name|
+      http = HTTP.new(202)
+      Time.stub(:zone_default, ActiveSupport::TimeZone[zone]) do
+        RailsMind::Transport.new(@config, http_factory: ->(_uri) { http }).send_batch('{"events":[]}')
+      end
+      assert_equal name, http.request_sent["X-RailsMind-Time-Zone"], zone
+      assert_equal "rails_mind/#{RailsMind::VERSION}", http.request_sent["User-Agent"]
+    end
+    http = HTTP.new(202)
+    Time.stub(:zone_default, nil) do
+      RailsMind::Transport.new(@config, http_factory: ->(_uri) { http }).send_batch('{"events":[]}')
+    end
+    assert_nil http.request_sent["X-RailsMind-Time-Zone"], "omitted when the app has no zone"
+    broken = Object.new
+    def broken.tzinfo = raise("no zone data")
+    http = HTTP.new(202)
+    Time.stub(:zone_default, broken) do
+      assert RailsMind::Transport.new(@config, http_factory: ->(_uri) { http }).send_batch('{"events":[]}').success
+    end
+    assert_nil http.request_sent["X-RailsMind-Time-Zone"]
+  end
 end

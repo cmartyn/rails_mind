@@ -43,6 +43,36 @@ class ConfigurationTest < Minitest::Test
     assert_raises(ArgumentError) { config.validate! }
   end
 
+  def test_page_view_switches_default_on_and_require_booleans
+    config = RailsMind::Configuration.new(env: { "RAILS_MIND_KEY" => "test-only" })
+    %i[page_views visitor_cookie link_page_views_to_users].each do |flag|
+      assert_equal true, config.public_send(flag), flag
+      config.public_send("#{flag}=", false)
+      assert_same config, config.validate!
+      config.public_send("#{flag}=", "false")
+      error = assert_raises(ArgumentError) { config.validate! }
+      assert_includes error.message, flag.to_s
+      config.public_send("#{flag}=", true)
+    end
+  end
+
+  def test_switches_are_never_read_from_the_environment
+    env = { "RAILS_MIND_KEY" => "test-only", "RAILS_MIND_PAGE_VIEWS" => "false", "RAILS_MIND_VISITOR_COOKIE" => "false",
+      "RAILS_MIND_LINK_PAGE_VIEWS_TO_USERS" => "false" }
+    config = RailsMind::Configuration.new(env: env)
+    assert_equal [ true, true, true ], [ config.page_views, config.visitor_cookie, config.link_page_views_to_users ]
+  end
+
+  def test_ignore_page_view_must_be_callable
+    config = RailsMind::Configuration.new(env: { "RAILS_MIND_KEY" => "test-only" })
+    assert_nil config.ignore_page_view
+    config.ignore_page_view = ->(request) { request.path.start_with?("/admin") }
+    assert_same config, config.validate!
+    config.ignore_page_view = "/admin"
+    error = assert_raises(ArgumentError) { config.validate! }
+    assert_includes error.message, "ignore_page_view"
+  end
+
   def test_endpoint_overrides_skip_blank_values_and_keep_transport_validation
     [ nil, "", " \n" ].each do |endpoint|
       config = RailsMind::Configuration.new(env: { "RAILS_MIND_ENDPOINT" => endpoint })
@@ -124,6 +154,35 @@ class ConfigurationTest < Minitest::Test
     end
   end
 
+  def test_doctor_tells_an_ahoy_app_what_to_remove
+    Dir.mktmpdir do |root|
+      config = RailsMind::Configuration.new(env: { "RAILS_MIND_KEY" => "test-only" }, root: root)
+      plan = RailsMind::Diagnostic.new(root: root, config: config).report[:plan]
+      refute plan.any? { |line| line.include?("Ahoy") }
+      refute plan.any? { |line| line.start_with?("Browser") }
+      File.write(File.join(root, "Gemfile.lock"), <<~LOCK)
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            ahoy_matey (5.5.0)
+
+        PLATFORMS
+          ruby
+
+        DEPENDENCIES
+          ahoy_matey
+
+        BUNDLED WITH
+           2.5.0
+      LOCK
+      report = RailsMind::Diagnostic.new(root: root, config: config).report
+      assert_equal "5.5.0", report[:detected]["ahoy_matey"]
+      hint = report[:plan].find { |line| line.start_with?("Ahoy detected") }
+      assert_includes hint, "rails_mind/integrations/ahoy"
+      assert_includes hint, "mirror_ahoy!"
+    end
+  end
+
   def test_doctor_reports_effective_configuration_without_exposing_the_key
     Dir.mktmpdir do |root|
       config = RailsMind::Configuration.new(env: { "RAILS_MIND_KEY" => "private-test-key", "RENDER_GIT_COMMIT" => "commit" }, root: root)
@@ -133,6 +192,11 @@ class ConfigurationTest < Minitest::Test
       assert report[:release_present]
       assert report[:enabled]
       assert_equal true, report[:automatic_sampling]
+      assert_equal true, report[:page_views]
+      assert_equal true, report[:visitor_cookie]
+      assert_equal true, report[:link_page_views_to_users]
+      config.page_views = false
+      assert_equal false, RailsMind::Diagnostic.new(root: root, config: config).report[:page_views]
       refute_includes report.to_json, "private-test-key"
       config.token = nil
       refute RailsMind::Diagnostic.new(root: root, config: config).report[:enabled]
