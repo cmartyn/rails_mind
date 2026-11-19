@@ -6,11 +6,12 @@ maintained separately and remain proprietary.
 
 ## Setup
 
-CI uses Ruby 4.0.6. Native workflow tests have also been run locally on Ruby 4.0.7; use the committed lockfile.
+Use Ruby 4.0.10, RubyGems and Bundler 4.1.0, and the committed lockfile to match CI.
 
 ```sh
 git clone https://github.com/cmartyn/rails_mind.git
 cd rails_mind
+gem update --system 4.1.0
 bundle install
 bundle exec rake test
 bundle exec ruby script/package_smoke.rb

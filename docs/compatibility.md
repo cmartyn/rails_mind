@@ -35,7 +35,7 @@ bundle exec rake test
 bundle exec ruby script/package_smoke.rb
 ```
 
-CI runs Ruby 4.0.6 / the locked Rails 8.1.4 dependencies on Linux. The package
+CI runs Ruby 4.0.10 with the locked Rails 8.1.4.1 dependencies on Linux. The package
 smoke check builds and installs a gem in a temporary directory, loads that copy,
 and runs the installer, page-view and native workflow tests against its packaged
 files.
